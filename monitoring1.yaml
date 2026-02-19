@@ -28,7 +28,7 @@
     - name: Fail if CPU usage is high
       fail:
         msg: "CPU usage high: {{ cpu_used }}% (Threshold: {{ cpu_threshold }}%)"
-      when: cpu_used > cpu_threshold
+      when: cpu_used | float > cpu_threshold
 
 
     ######################
@@ -48,7 +48,7 @@
     - name: Fail if memory usage is high
       fail:
         msg: "Memory usage high: {{ memory_used }}% (Threshold: {{ memory_threshold }}%)"
-      when: memory_used > memory_threshold
+      when: memory_used | float > memory_threshold
 
 
     ######################
@@ -65,5 +65,4 @@
       fail:
         msg: "Disk usage high on {{ item.split()[1] }}: {{ item.split()[0] }} (Threshold: {{ disk_threshold }}%)"
       loop: "{{ disk_usage.stdout_lines }}"
-      when: item.split()[0].replace('%','') | int > disk_threshold
-
+      when: (item.split()[0].replace('%','') | int) > disk_threshold
