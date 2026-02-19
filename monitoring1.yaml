@@ -24,11 +24,11 @@
 
     - name: Set CPU usage fact
       set_fact:
-        cpu_used: "{{ cpu_usage.stdout | float }}"
+        cpu_used: "{{ cpu_usage.stdout | float(0) }}"
 
     - name: Display current CPU usage
       debug:
-        msg: "Current CPU usage: {{ cpu_used | round(1) }}% (Threshold: {{ cpu_threshold }}%)"
+        msg: "Current CPU usage: {{ cpu_used | float | round(1) }}% (Threshold: {{ cpu_threshold }}%)"
 
     - name: Fail if CPU usage is high
       fail:
@@ -48,11 +48,11 @@
 
     - name: Set memory usage fact
       set_fact:
-        memory_used: "{{ memory_usage.stdout | float }}"
+        memory_used: "{{ memory_usage.stdout | float(0) }}"
 
     - name: Display current memory usage
       debug:
-        msg: "Current Memory usage: {{ memory_used | round(2) }}% (Threshold: {{ memory_threshold }}%)"
+        msg: "Current Memory usage: {{ memory_used | float | round(2) }}% (Threshold: {{ memory_threshold }}%)"
 
     - name: Fail if memory usage is high
       fail:
