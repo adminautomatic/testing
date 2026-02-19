@@ -8,7 +8,7 @@
     cpu_threshold: 80          # %
     memory_threshold: 80       # %
     disk_threshold: 80         # %
-    k3s_storage_threshold_gb: 10  # Alert if containerd storage > this GB
+    k3s_storage_threshold_gb: 10  # Alert if > this GB
 
   tasks:
 
@@ -25,6 +25,10 @@
     - name: Set CPU usage fact
       set_fact:
         cpu_used: "{{ cpu_usage.stdout | float }}"
+
+    - name: Display current CPU usage
+      debug:
+        msg: "Current CPU usage: {{ cpu_used | round(1) }}% (Threshold: {{ cpu_threshold }}%)"
 
     - name: Fail if CPU usage is high
       fail:
@@ -45,6 +49,10 @@
     - name: Set memory usage fact
       set_fact:
         memory_used: "{{ memory_usage.stdout | float }}"
+
+    - name: Display current memory usage
+      debug:
+        msg: "Current Memory usage: {{ memory_used | round(2) }}% (Threshold: {{ memory_threshold }}%)"
 
     - name: Fail if memory usage is high
       fail:
