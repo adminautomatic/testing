@@ -1,0 +1,11 @@
+---
+- name: AWX sample job test
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  tasks:
+    - name: Say hello
+      debug:
+        msg: "Hello from AWX — job is working!"
+
