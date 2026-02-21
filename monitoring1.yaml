@@ -5,10 +5,10 @@
   gather_facts: no
 
   vars:
-    cpu_threshold: 80              # %
-    memory_threshold: 80           # %
-    disk_threshold: 80             # %
-    k3s_storage_threshold_gb: 10    # GB
+    cpu_threshold: 80
+    memory_threshold: 80
+    disk_threshold: 80
+    k3s_storage_threshold_gb: 10
 
   tasks:
 
@@ -64,17 +64,27 @@
       register: disk_usage
       changed_when: false
 
-    - name: Determine highest disk usage %
+    - name: Parse disk usage percentages
       set_fact:
-        disk_used_max: >-
+        disk_usage_list: >-
           {{
             disk_usage.stdout_lines
             | map('regex_replace', '%', '')
             | map('split')
             | map('first')
             | map('int')
-            | max(default=0)
+            | list
           }}
+
+    - name: Determine highest disk usage %
+      set_fact:
+        disk_used_max: "{{ disk_usage_list | max }}"
+      when: disk_usage_list | length > 0
+
+    - name: Default disk usage to 0 when no disks found
+      set_fact:
+        disk_used_max: 0
+      when: disk_usage_list | length == 0
 
     - name: Fail if disk usage is high
       fail:
