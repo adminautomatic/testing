@@ -30,7 +30,7 @@
 
     - name: Set CPU facts
       ansible.builtin.set_fact:
-        cpu_used: "{{ cpu_raw.stdout | float | round(1) }}"
+        cpu_used: "{{ cpu_raw.stdout | float }}"
         cpu_fail: "{{ (cpu_raw.stdout | float) > cpu_threshold }}"
 
     - name: Get memory usage percentage
@@ -45,39 +45,42 @@
         memory_used: "{{ mem_raw.stdout | float }}"
         memory_fail: "{{ (mem_raw.stdout | float) > memory_threshold }}"
 
-    - name: Get filesystem usage (excluding loop/tmpfs)
+    - name: Get filesystem usage (skip tmpfs/loop/overlay)
       ansible.builtin.shell: >
         df -hP | awk 'NR>1 && $1 !~ /^(tmpfs|devtmpfs|overlay)$/ && $NF !~ /^\/dev\/loop/ {print $NF " " $5}'
       register: fs_raw
       changed_when: false
       check_mode: false
 
-    - name: Calculate max disk usage and fail flag
+    - name: Calculate max disk usage and fail flag - safe for old Jinja
       ansible.builtin.set_fact:
-        disk_used_max: >-
+        disk_percentages: >-
           {{ fs_raw.stdout_lines
              | map('split')
              | map('last')
              | map('regex_replace', '%', '')
-             | map('int')
-             | max(default=0) }}
+             | map('int') }}
+        disk_used_max: >-
+          {% if fs_raw.stdout_lines | length > 0 %}
+            {{ disk_percentages | max }}
+          {% else %}
+            0
+          {% endif %}
         disk_fail: >-
-          {{ (fs_raw.stdout_lines
-              | map('split')
-              | map('last')
-              | map('regex_replace', '%', '')
-              | map('int')
-              | max(default=0)) > disk_threshold }}
+          {% if fs_raw.stdout_lines | length > 0 and (disk_percentages | max) > disk_threshold %}
+            true
+          {% else %}
+            false
+          {% endif %}
 
     - name: Build filesystem list for report
       ansible.builtin.set_fact:
         filesystems: >-
           {{ fs_raw.stdout_lines
              | map('split', ' ', 1)
-             | map('zip', ['mount', 'usage'])
-             | map('community.general.dict_kv') }}
+             | map('community.general.dict_kv', keys=['mount','usage']) }}
 
-    - name: Get k3s containerd storage (GB) - ignore if missing
+    - name: Get k3s containerd storage (GB) - safe if missing
       ansible.builtin.shell: >
         du -sx --block-size=1G /var/lib/rancher/k3s/agent/containerd 2>/dev/null | cut -f1 || echo 0
       register: k3s_raw
@@ -112,8 +115,8 @@
 
           | Host                  | CPU % | Mem % | Disk % | k3s GB | Status |
           |-----------------------|-------|-------|--------|--------|--------|
-          {% for h in groups.all | sort %}
-          | {{ h | truncate(21) }} | {{ hostvars[h].monitoring_summary.cpu | default('err') }} | {{ hostvars[h].monitoring_summary.memory | default('err') }} | {{ hostvars[h].monitoring_summary.disk | default('err') }} | {{ hostvars[h].monitoring_summary.k3s | default('err') }} | {{ 'FAIL' if hostvars[h].monitoring_summary.failed else 'OK' }} |
+          {% for h in groups['all'] | sort %}
+          | {{ h | truncate(21) }} | {{ hostvars[h].monitoring_summary.cpu }} | {{ hostvars[h].monitoring_summary.memory }} | {{ hostvars[h].monitoring_summary.disk }} | {{ hostvars[h].monitoring_summary.k3s }} | {{ 'FAIL' if hostvars[h].monitoring_summary.failed else 'OK' }} |
           {% endfor %}
 
     - name: Display detailed filesystem usage
@@ -121,7 +124,7 @@
         msg: |
           ## Filesystem Usage per Host
 
-          {% for h in groups.all | sort %}
+          {% for h in groups['all'] | sort %}
           ### {{ h }}
 
           | Mount Point              | Usage  |
@@ -129,19 +132,22 @@
           {% for fs in hostvars[h].filesystems | default([]) %}
           | {{ fs.mount | truncate(24) }} | {{ fs.usage }} |
           {% else %}
-          | (no data)                | —      |
+          | (no data collected)      | —      |
           {% endfor %}
 
           {% endfor %}
 
     - name: Collect failed hosts
       ansible.builtin.set_fact:
-        failed_hosts: "{{ groups.all | select('hostvar_defined', 'monitoring_summary.failed') | select('equalto', true, 'monitoring_summary.failed') | list }}"
+        failed_hosts: >-
+          {{ groups['all'] 
+             | select('search', hostvars[ item ].monitoring_summary.failed | default(false) | bool ) 
+             | list }}
 
-    - name: Fail playbook if thresholds exceeded
+    - name: Fail if any thresholds exceeded
       ansible.builtin.fail:
         msg: |
-          🚨 CRITICAL: Resource thresholds exceeded on:
+          🚨 Resource thresholds exceeded on:
 
-          • {{ failed_hosts | join('\n• ') | default('— none —') }}
+          • {{ failed_hosts | join('\n• ') | default('none') }}
       when: failed_hosts | length > 0
