@@ -1,5 +1,5 @@
 ---
-- name: Monitor CPU, Memory, Disk, Filesystems, and K3s Storage on Nodes
+- name: AWX-safe node resource monitoring
   hosts: all
   become: yes
   gather_facts: no
@@ -18,13 +18,13 @@
 
     - name: Get CPU usage
       shell: top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8}'
-      register: cpu_usage
+      register: cpu_raw
       changed_when: false
 
     - name: Normalize CPU
       set_fact:
-        cpu_used: "{{ cpu_usage.stdout | float }}"
-        cpu_status: "{{ '🔴 FAIL' if cpu_used > cpu_threshold else '🟢 OK' }}"
+        cpu_used: "{{ cpu_raw.stdout | float }}"
+        cpu_fail: "{{ (cpu_raw.stdout | float) > cpu_threshold }}"
 
 
     ######################
@@ -32,48 +32,49 @@
     ######################
 
     - name: Get memory usage
-      shell: free | awk '/Mem:/ { printf("%.2f"), $3/$2 * 100 }'
-      register: memory_usage
+      shell: free | awk '/Mem:/ { print ($3/$2)*100 }'
+      register: mem_raw
       changed_when: false
 
     - name: Normalize memory
       set_fact:
-        memory_used: "{{ memory_usage.stdout | float }}"
-        memory_status: "{{ '🔴 FAIL' if memory_used > memory_threshold else '🟢 OK' }}"
+        memory_used: "{{ mem_raw.stdout | float }}"
+        memory_fail: "{{ (mem_raw.stdout | float) > memory_threshold }}"
 
 
     ######################
-    # FILESYSTEMS + DISK
+    # FILESYSTEMS
     ######################
 
-    - name: Get filesystem usage (all real mounts)
-      shell: |
-        df -hP --output=target,pcent -x tmpfs -x devtmpfs -x overlay -x squashfs | tail -n +2
-      register: filesystem_usage
+    - name: Get filesystem usage
+      shell: >
+        df -hP --output=target,pcent
+        -x tmpfs -x devtmpfs -x overlay -x squashfs
+        | tail -n +2
+      register: fs_raw
       changed_when: false
 
-    - name: Normalize filesystem usage
+    - name: Initialize filesystem facts
       set_fact:
-        filesystems: >-
-          {{
-            filesystem_usage.stdout_lines
-            | map('split')
-            | map('list')
-            | map('community.general.dict', ['mount', 'usage'])
-            | list
-          }}
+        filesystems: []
+        disk_used_max: 0
 
-    - name: Calculate max disk usage
+    - name: Parse filesystem usage safely
       set_fact:
+        filesystems: "{{ filesystems + [ { 'mount': fs_parts[0], 'usage': fs_parts[1] } ] }}"
         disk_used_max: >-
           {{
-            filesystem_usage.stdout_lines
-            | map('regex_replace', '^.*\\s+([0-9]+)%$', '\\1')
-            | map('int')
-            | max
-            | default(0)
+            fs_percent > disk_used_max
+            | ternary(fs_percent, disk_used_max)
           }}
-        disk_status: "{{ '🔴 FAIL' if disk_used_max > disk_threshold else '🟢 OK' }}"
+      vars:
+        fs_parts: "{{ item.split() }}"
+        fs_percent: "{{ item.split()[1] | regex_replace('%','') | int }}"
+      loop: "{{ fs_raw.stdout_lines }}"
+
+    - name: Evaluate disk status
+      set_fact:
+        disk_fail: "{{ disk_used_max > disk_threshold }}"
 
 
     ######################
@@ -81,65 +82,62 @@
     ######################
 
     - name: Get K3s containerd storage usage (GB)
-      shell: du -s --block-size=1G /var/lib/rancher/k3s/agent/containerd 2>/dev/null | awk '{print $1}' || echo 0
-      register: k3s_storage_raw
+      shell: >
+        du -s --block-size=1G /var/lib/rancher/k3s/agent/containerd
+        2>/dev/null | awk '{print $1}' || echo 0
+      register: k3s_raw
       changed_when: false
 
     - name: Normalize K3s storage
       set_fact:
-        k3s_storage_gb: "{{ k3s_storage_raw.stdout | int }}"
-        k3s_status: "{{ '🔴 FAIL' if k3s_storage_gb > k3s_storage_threshold_gb else '🟢 OK' }}"
+        k3s_storage_gb: "{{ k3s_raw.stdout | int }}"
+        k3s_fail: "{{ (k3s_raw.stdout | int) > k3s_storage_threshold_gb }}"
 
 
     ######################
     # HOST SUMMARY
     ######################
 
-    - name: Save host monitoring summary
+    - name: Build host monitoring summary
       set_fact:
         monitoring_summary:
           cpu: "{{ '%.1f' | format(cpu_used) }}"
           memory: "{{ '%.1f' | format(memory_used) }}"
           disk: "{{ disk_used_max }}"
           k3s: "{{ k3s_storage_gb }}"
-          status: >-
-            {{
-              '🔴 FAIL'
-              if 'FAIL' in [cpu_status, memory_status, disk_status, k3s_status]
-              else '🟢 OK'
-            }}
+          failed: "{{ cpu_fail or memory_fail or disk_fail or k3s_fail }}"
 
 
     ######################
     # CONSOLIDATED REPORTS
     ######################
 
-    - name: Display cluster resource summary
+    - name: Print cluster resource summary
       run_once: true
       delegate_to: localhost
       debug:
         msg: |
-          ## 📊 K3s Cluster Resource Usage Summary
+          ## 📊 Cluster Resource Summary
 
-          | Hostname | CPU % | MEM % | Max Disk % | K3s GB | Status |
-          |----------|-------|-------|------------|--------|--------|
-          {% for host in groups['all'] %}
-          | {{ host }} | {{ hostvars[host].monitoring_summary.cpu }} | {{ hostvars[host].monitoring_summary.memory }} | {{ hostvars[host].monitoring_summary.disk }} | {{ hostvars[host].monitoring_summary.k3s }} | {{ hostvars[host].monitoring_summary.status }} |
+          | Host | CPU % | MEM % | Max Disk % | K3s GB | Status |
+          |------|-------|-------|------------|--------|--------|
+          {% for h in groups['all'] %}
+          | {{ h }} | {{ hostvars[h].monitoring_summary.cpu }} | {{ hostvars[h].monitoring_summary.memory }} | {{ hostvars[h].monitoring_summary.disk }} | {{ hostvars[h].monitoring_summary.k3s }} | {{ 'FAIL' if hostvars[h].monitoring_summary.failed else 'OK' }} |
           {% endfor %}
 
-    - name: Display filesystem usage per host
+    - name: Print filesystem usage per host
       run_once: true
       delegate_to: localhost
       debug:
         msg: |
-          ## 💽 Filesystem Usage by Host
+          ## 💽 Filesystem Usage
 
-          {% for host in groups['all'] %}
-          ### 🖥️ {{ host }}
+          {% for h in groups['all'] %}
+          ### {{ h }}
 
           | Mount | Usage |
           |-------|-------|
-          {% for fs in hostvars[host].filesystems %}
+          {% for fs in hostvars[h].filesystems %}
           | {{ fs.mount }} | {{ fs.usage }} |
           {% endfor %}
 
@@ -147,7 +145,7 @@
 
 
     ######################
-    # FINAL FAIL (AWX-SAFE)
+    # FINAL FAIL (ONLY HERE)
     ######################
 
     - name: Initialize failed hosts list
@@ -162,15 +160,14 @@
       set_fact:
         failed_hosts: "{{ failed_hosts + [item] }}"
       loop: "{{ groups['all'] }}"
-      when: hostvars[item].monitoring_summary.status == '🔴 FAIL'
+      when: hostvars[item].monitoring_summary.failed
 
-    - name: Fail play if any host exceeded thresholds
+    - name: Fail if any host exceeded thresholds
       run_once: true
       delegate_to: localhost
       fail:
         msg: |
-          🚨 One or more hosts exceeded resource thresholds.
+          🚨 Resource thresholds exceeded on the following hosts:
 
-          Failed hosts:
           {{ failed_hosts | join(', ') }}
       when: failed_hosts | length > 0
