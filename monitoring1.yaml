@@ -43,14 +43,13 @@
 
 
     ######################
-    # FILESYSTEMS + DISK
+    # FILESYSTEMS + DISK (PORTABLE)
     ######################
 
-    - name: Get filesystem usage
+    - name: Get filesystem usage (POSIX-safe)
       shell: >
-        df -hP --output=target,pcent
-        -x tmpfs -x devtmpfs -x overlay -x squashfs
-        | tail -n +2
+        df -hP
+        | awk 'NR>1 {print $6, $5}'
       register: fs_raw
       changed_when: false
 
@@ -62,7 +61,9 @@
     - name: Parse filesystem usage (AWX-safe)
       set_fact:
         filesystems: "{{ filesystems + [ { 'mount': item.split()[0], 'usage': item.split()[1] } ] }}"
-        disk_used_max: "{{ (item.split()[1] | regex_replace('%','') | int) if (item.split()[1] | regex_replace('%','') | int) > disk_used_max else disk_used_max }}"
+        disk_used_max: "{{ fs_percent if fs_percent > disk_used_max else disk_used_max }}"
+      vars:
+        fs_percent: "{{ item.split()[1] | regex_replace('%','') | int }}"
       loop: "{{ fs_raw.stdout_lines }}"
 
     - name: Evaluate disk status
