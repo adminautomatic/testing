@@ -24,7 +24,7 @@
     - name: Normalize CPU
       set_fact:
         cpu_used: "{{ cpu_usage.stdout | float }}"
-        cpu_status: "{{ '🔴 FAIL' if (cpu_usage.stdout | float) > cpu_threshold else '🟢 OK' }}"
+        cpu_status: "{{ 'FAIL' if (cpu_usage.stdout | float) > cpu_threshold else 'OK' }}"
 
 
     ######################
@@ -39,7 +39,7 @@
     - name: Normalize memory
       set_fact:
         memory_used: "{{ memory_usage.stdout | float }}"
-        memory_status: "{{ '🔴 FAIL' if (memory_usage.stdout | float) > memory_threshold else '🟢 OK' }}"
+        memory_status: "{{ 'FAIL' if (memory_usage.stdout | float) > memory_threshold else 'OK' }}"
 
 
     ######################
@@ -56,7 +56,7 @@
     - name: Normalize disk
       set_fact:
         disk_used_max: "{{ disk_usage.stdout_lines | map('int') | max | default(0) }}"
-        disk_status: "{{ '🔴 FAIL' if (disk_usage.stdout_lines | map('int') | max | default(0)) > disk_threshold else '🟢 OK' }}"
+        disk_status: "{{ 'FAIL' if (disk_usage.stdout_lines | map('int') | max | default(0)) > disk_threshold else 'OK' }}"
 
 
     ######################
@@ -71,11 +71,11 @@
     - name: Normalize K3s storage
       set_fact:
         k3s_storage_gb: "{{ k3s_storage_raw.stdout | int }}"
-        k3s_status: "{{ '🔴 FAIL' if (k3s_storage_raw.stdout | int) > k3s_storage_threshold_gb else '🟢 OK' }}"
+        k3s_status: "{{ 'FAIL' if (k3s_storage_raw.stdout | int) > k3s_storage_threshold_gb else 'OK' }}"
 
 
     ######################
-    # HOST SUMMARY (AWX-SAFE)
+    # HOST SUMMARY
     ######################
 
     - name: Save host monitoring summary
@@ -87,9 +87,9 @@
           k3s: "{{ k3s_storage_gb | int }}"
           status: >-
             {{
-              '🔴 FAIL'
+              'FAIL'
               if 'FAIL' in [cpu_status, memory_status, disk_status, k3s_status]
-              else '🟢 OK'
+              else 'OK'
             }}
 
 
@@ -102,17 +102,28 @@
       delegate_to: localhost
       debug:
         msg: |
-          ## 📊 K3s Cluster Resource Usage Summary
-
-          | Hostname | CPU % | MEM % | DISK % | K3s GB | Status |
-          |----------|-------|-------|--------|--------|--------|
-          {% for host in groups['all'] -%}
-          | {{ host }} | {{ hostvars[host].monitoring_summary.cpu }} | {{ hostvars[host].monitoring_summary.memory }} | {{ hostvars[host].monitoring_summary.disk }} | {{ hostvars[host].monitoring_summary.k3s }} | {{ hostvars[host].monitoring_summary.status }} |
+          ============================================================
+          📊 K3s Cluster Resource Usage Summary
+          ============================================================
+          Hostname                              CPU%   MEM%   DISK%   K3sGB   Status
+          ------------------------------------------------------------
+          {% for host in groups['all'] %}
+          {{ "%-36s %5s %6s %7s %7s   %s"
+             | format(
+                 host,
+                 hostvars[host].monitoring_summary.cpu,
+                 hostvars[host].monitoring_summary.memory,
+                 hostvars[host].monitoring_summary.disk,
+                 hostvars[host].monitoring_summary.k3s,
+                 hostvars[host].monitoring_summary.status
+               )
+          }}
           {% endfor %}
+          ============================================================
 
 
     ######################
-    # FINAL FAIL (LOOP-BASED, AWX-SAFE)
+    # FINAL FAIL (AFTER REPORT)
     ######################
 
     - name: Initialize failed hosts list
@@ -127,7 +138,7 @@
       set_fact:
         failed_hosts: "{{ failed_hosts + [item] }}"
       loop: "{{ groups['all'] }}"
-      when: hostvars[item].monitoring_summary.status == '🔴 FAIL'
+      when: hostvars[item].monitoring_summary.status == 'FAIL'
 
     - name: Fail play if any host exceeded thresholds
       run_once: true
@@ -135,7 +146,5 @@
       fail:
         msg: |
           🚨 One or more hosts exceeded resource thresholds.
-
-          Failed hosts:
-          {{ failed_hosts | join(', ') }}
+          Failed hosts: {{ failed_hosts | join(', ') }}
       when: failed_hosts | length > 0
