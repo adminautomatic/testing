@@ -113,18 +113,16 @@
 
 
     ######################
-    # SAVE STATS FOR SUMMARY
+    # SAVE PER-HOST SUMMARY (FACT)
     ######################
 
-    - name: Save monitoring stats
-      set_stats:
-        data:
-          monitoring_summary:
-            "{{ inventory_hostname }}":
-              cpu: "{{ cpu_used | float | round(1) }}"
-              memory: "{{ memory_used | float | round(1) }}"
-              disk: "{{ disk_used_max }}"
-              k3s: "{{ k3s_storage_gb }}"
+    - name: Save host monitoring summary
+      set_fact:
+        monitoring_summary:
+          cpu: "{{ cpu_used | float | round(1) }}"
+          memory: "{{ memory_used | float | round(1) }}"
+          disk: "{{ disk_used_max }}"
+          k3s: "{{ k3s_storage_gb }}"
 
 
     ######################
@@ -141,11 +139,11 @@
           ======================================================
           Hostname              CPU%    MEM%    DISK%   K3s(GB)
           ------------------------------------------------------
-          {% for host, data in ansible_stats.data.monitoring_summary.items() %}
+          {% for host in groups['all'] %}
           {{ "%-20s" | format(host) }}
-          {{ "%-7s"  | format(data.cpu) }}
-          {{ "%-7s"  | format(data.memory) }}
-          {{ "%-7s"  | format(data.disk) }}
-          {{ "%-7s"  | format(data.k3s) }}
+          {{ "%-7s" | format(hostvars[host].monitoring_summary.cpu) }}
+          {{ "%-7s" | format(hostvars[host].monitoring_summary.memory) }}
+          {{ "%-7s" | format(hostvars[host].monitoring_summary.disk) }}
+          {{ "%-7s" | format(hostvars[host].monitoring_summary.k3s) }}
           {% endfor %}
           ======================================================
