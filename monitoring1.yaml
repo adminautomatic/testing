@@ -21,8 +21,9 @@
       register: cpu_usage
       changed_when: false
 
-    - set_fact:
-        cpu_used: "{{ cpu_usage.stdout | float }}"
+    - name: Normalize CPU value
+      set_fact:
+        cpu_used_f: "{{ cpu_usage.stdout | float }}"
         cpu_status: "{{ '🔴 FAIL' if (cpu_usage.stdout | float) > cpu_threshold else '🟢 OK' }}"
 
 
@@ -35,8 +36,9 @@
       register: memory_usage
       changed_when: false
 
-    - set_fact:
-        memory_used: "{{ memory_usage.stdout | float }}"
+    - name: Normalize memory value
+      set_fact:
+        memory_used_f: "{{ memory_usage.stdout | float }}"
         memory_status: "{{ '🔴 FAIL' if (memory_usage.stdout | float) > memory_threshold else '🟢 OK' }}"
 
 
@@ -44,15 +46,16 @@
     # DISK
     ######################
 
-    - name: Get disk usage
+    - name: Get disk usage (host only)
       shell: |
         df -h --output=pcent -x tmpfs -x devtmpfs -x overlay -x squashfs \
         | tail -n +2 | tr -d '%'
       register: disk_usage
       changed_when: false
 
-    - set_fact:
-        disk_used_max: "{{ disk_usage.stdout_lines | map('int') | max | default(0) }}"
+    - name: Normalize disk usage
+      set_fact:
+        disk_used_max_i: "{{ disk_usage.stdout_lines | map('int') | max | default(0) }}"
         disk_status: "{{ '🔴 FAIL' if (disk_usage.stdout_lines | map('int') | max | default(0)) > disk_threshold else '🟢 OK' }}"
 
 
@@ -65,8 +68,9 @@
       register: k3s_storage_raw
       changed_when: false
 
-    - set_fact:
-        k3s_storage_gb: "{{ k3s_storage_raw.stdout | int }}"
+    - name: Normalize K3s storage
+      set_fact:
+        k3s_storage_gb_i: "{{ k3s_storage_raw.stdout | int }}"
         k3s_status: "{{ '🔴 FAIL' if (k3s_storage_raw.stdout | int) > k3s_storage_threshold_gb else '🟢 OK' }}"
 
 
@@ -77,10 +81,10 @@
     - name: Save host monitoring summary
       set_fact:
         monitoring_summary:
-          cpu: "{{ cpu_used | round(1) }}"
-          memory: "{{ memory_used | round(1) }}"
-          disk: "{{ disk_used_max }}"
-          k3s: "{{ k3s_storage_gb }}"
+          cpu: "{{ cpu_used_f | round(1) }}"
+          memory: "{{ memory_used_f | round(1) }}"
+          disk: "{{ disk_used_max_i }}"
+          k3s: "{{ k3s_storage_gb_i }}"
           status: >-
             {{
               '🔴 FAIL'
@@ -108,7 +112,7 @@
 
 
     ######################
-    # FINAL FAIL (IF NEEDED)
+    # FINAL FAIL (AFTER REPORT)
     ######################
 
     - name: Fail play if any host is in FAIL state
