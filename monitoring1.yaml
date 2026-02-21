@@ -43,13 +43,11 @@
 
 
     ######################
-    # FILESYSTEMS + DISK (PORTABLE)
+    # FILESYSTEMS + DISK (ULTRA SAFE)
     ######################
 
     - name: Get filesystem usage (POSIX-safe)
-      shell: >
-        df -hP
-        | awk 'NR>1 {print $6, $5}'
+      shell: df -hP | awk 'NR>1 {print $6, $5}'
       register: fs_raw
       changed_when: false
 
@@ -58,17 +56,23 @@
         filesystems: []
         disk_used_max: 0
 
-    - name: Parse filesystem usage (AWX-safe)
+    - name: Add filesystem entries
       set_fact:
         filesystems: "{{ filesystems + [ { 'mount': item.split()[0], 'usage': item.split()[1] } ] }}"
-        disk_used_max: "{{ fs_percent if fs_percent > disk_used_max else disk_used_max }}"
-      vars:
-        fs_percent: "{{ item.split()[1] | regex_replace('%','') | int }}"
       loop: "{{ fs_raw.stdout_lines }}"
+
+    - name: Update max disk usage (AWX-safe)
+      set_fact:
+        disk_used_max: "{{ item.split()[1] | regex_replace('%','') | int }}"
+      loop: "{{ fs_raw.stdout_lines }}"
+      when: >
+        (item.split()[1] | regex_replace('%','') | int)
+        >
+        (disk_used_max | int)
 
     - name: Evaluate disk status
       set_fact:
-        disk_fail: "{{ disk_used_max > disk_threshold }}"
+        disk_fail: "{{ (disk_used_max | int) > disk_threshold }}"
 
 
     ######################
