@@ -59,9 +59,9 @@
              | map('regex_replace', '%', '')
              | map('int') | list }}
         disk_used_max_pct: >-
-          {{ disk_percentages | max(default=0) }}
+          {% if disk_percentages | length > 0 %}{{ disk_percentages | max }}{% else %}0{% endif %}
         disk_over_threshold: >-
-          {{ disk_percentages | length > 0 and (disk_percentages | max) > disk_threshold }}
+          {% if disk_percentages | length > 0 and (disk_percentages | max) > disk_threshold %}true{% else %}false{% endif %}
 
     - name: Build filesystem list for report
       ansible.builtin.set_fact:
@@ -129,9 +129,11 @@
     - name: Collect failed hosts (robust against missing facts)
       ansible.builtin.set_fact:
         failed_hosts: >-
-          {{ groups['all']
-             | select('defined', hostvars[ item ].get('monitoring_summary', {}))
-             | selectattr('monitoring_summary.failed', 'equalto', true)
+          {{ hostvars 
+             | dict2items 
+             | selectattr('value.monitoring_summary.failed', 'defined') 
+             | selectattr('value.monitoring_summary.failed', 'equalto', true) 
+             | map(attribute='key') 
              | list }}
 
     - name: Fail the playbook if any node exceeds thresholds
