@@ -106,7 +106,7 @@
           | Host                  | CPU % | Mem % | Disk % | k3s GB | Status |
           |:----------------------|------:|------:|-------:|-------:|--------|
           {% for host in groups['all'] | sort %}
-          | {{ host | truncate(21) }} | {{ hostvars[host].monitoring_summary.cpu | default('n/a') }} | {{ hostvars[host].monitoring_summary.memory | default('n/a') }} | {{ hostvars[host].monitoring_summary.disk | default('n/a') }} | {{ hostvars[host].monitoring_summary.k3s | default('n/a') }} | {{ 'FAIL' if hostvars[host].monitoring_summary.failed else 'OK' }} |
+          | {{ host | truncate(21) }} | {{ hostvars[host].monitoring_summary.cpu | default('n/a') }} | {{ hostvars[host].monitoring_summary.memory | default('n/a') }} | {{ hostvars[host].monitoring_summary.disk | default('n/a') }} | {{ hostvars[host].monitoring_summary.k3s | default('n/a') }} | {{ 'FAIL' if hostvars[host].monitoring_summary.failed | default(false) else 'OK' }} |
           {% endfor %}
 
     - name: Display detailed filesystem usage
@@ -126,9 +126,13 @@
 
           {% endfor %}
 
-    - name: Collect failed hosts
+    - name: Collect failed hosts (robust against missing facts)
       ansible.builtin.set_fact:
-        failed_hosts: "{{ groups['all'] | selectattr('monitoring_summary.failed', 'equalto', true) | list }}"
+        failed_hosts: >-
+          {{ groups['all']
+             | select('defined', hostvars[ item ].get('monitoring_summary', {}))
+             | selectattr('monitoring_summary.failed', 'equalto', true)
+             | list }}
 
     - name: Fail the playbook if any node exceeds thresholds
       ansible.builtin.fail:
