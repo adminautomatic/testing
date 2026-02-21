@@ -28,8 +28,8 @@
 
     - name: Fail if CPU usage is high
       fail:
-        msg: "CPU usage high: {{ cpu_used | float | round(1) }}% (Threshold: {{ cpu_threshold }}%)"
-      when: (cpu_used | float) > (cpu_threshold | float)
+        msg: "❌ CPU usage high: {{ cpu_used | round(1) }}% (Threshold: {{ cpu_threshold }}%)"
+      when: cpu_used > cpu_threshold
 
 
     ######################
@@ -48,8 +48,8 @@
 
     - name: Fail if memory usage is high
       fail:
-        msg: "Memory usage high: {{ memory_used | float | round(1) }}% (Threshold: {{ memory_threshold }}%)"
-      when: (memory_used | float) > (memory_threshold | float)
+        msg: "❌ Memory usage high: {{ memory_used | round(1) }}% (Threshold: {{ memory_threshold }}%)"
+      when: memory_used > memory_threshold
 
 
     ######################
@@ -76,20 +76,14 @@
             | list
           }}
 
-    - name: Determine highest disk usage %
+    - name: Set max disk usage
       set_fact:
-        disk_used_max: "{{ disk_usage_list | max }}"
-      when: disk_usage_list | length > 0
-
-    - name: Default disk usage to 0 when no disks found
-      set_fact:
-        disk_used_max: 0
-      when: disk_usage_list | length == 0
+        disk_used_max: "{{ disk_usage_list | max | default(0) }}"
 
     - name: Fail if disk usage is high
       fail:
-        msg: "Disk usage high: {{ disk_used_max }}% (Threshold: {{ disk_threshold }}%)"
-      when: (disk_used_max | int) > (disk_threshold | int)
+        msg: "❌ Disk usage high: {{ disk_used_max }}% (Threshold: {{ disk_threshold }}%)"
+      when: disk_used_max > disk_threshold
 
 
     ######################
@@ -99,17 +93,17 @@
     - name: Get K3s containerd storage usage in GB
       shell: |
         du -s --block-size=1G /var/lib/rancher/k3s/agent/containerd 2>/dev/null | awk '{print $1}' || echo 0
-      register: k3s_storage_gb_raw
+      register: k3s_storage_raw
       changed_when: false
 
     - name: Set K3s storage fact
       set_fact:
-        k3s_storage_gb: "{{ k3s_storage_gb_raw.stdout | int }}"
+        k3s_storage_gb: "{{ k3s_storage_raw.stdout | int }}"
 
     - name: Fail if K3s storage is high
       fail:
-        msg: "K3s containerd storage high: {{ k3s_storage_gb }} GB (Threshold: {{ k3s_storage_threshold_gb }} GB)"
-      when: (k3s_storage_gb | int) > (k3s_storage_threshold_gb | int)
+        msg: "❌ K3s containerd storage high: {{ k3s_storage_gb }} GB (Threshold: {{ k3s_storage_threshold_gb }} GB)"
+      when: k3s_storage_gb > k3s_storage_threshold_gb
 
 
     ######################
@@ -119,8 +113,8 @@
     - name: Save host monitoring summary
       set_fact:
         monitoring_summary:
-          cpu: "{{ cpu_used | float | round(1) }}"
-          memory: "{{ memory_used | float | round(1) }}"
+          cpu: "{{ cpu_used | round(1) }}"
+          memory: "{{ memory_used | round(1) }}"
           disk: "{{ disk_used_max }}"
           k3s: "{{ k3s_storage_gb }}"
 
@@ -134,20 +128,10 @@
       delegate_to: localhost
       debug:
         msg: |
-          ======================================================
-          K3s Cluster Resource Usage Summary
-          ======================================================
-          Hostname                     CPU%    MEM%    DISK%   K3s(GB)
-          ------------------------------------------------------
-          {% for host in groups['all'] %}
-          {{ "%-28s %-7.1f %-7.1f %-7d %-7d"
-             | format(
-                 host,
-                 hostvars[host].monitoring_summary.cpu | float,
-                 hostvars[host].monitoring_summary.memory | float,
-                 hostvars[host].monitoring_summary.disk | int,
-                 hostvars[host].monitoring_summary.k3s | int
-               )
-          }}
+          ## 📊 K3s Cluster Resource Usage Summary
+
+          | Hostname | CPU (%) | Memory (%) | Disk (%) | K3s Storage (GB) |
+          |----------|---------|------------|----------|------------------|
+          {% for host in groups['all'] -%}
+          | {{ host }} | {{ hostvars[host].monitoring_summary.cpu }} | {{ hostvars[host].monitoring_summary.memory }} | {{ hostvars[host].monitoring_summary.disk }} | {{ hostvars[host].monitoring_summary.k3s }} |
           {% endfor %}
-          ======================================================
