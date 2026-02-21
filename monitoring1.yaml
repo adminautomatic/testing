@@ -42,7 +42,7 @@
     # DISK MONITORING
     ######################
 
-    - name: Get disk usage (max %)
+    - name: Get max disk usage %
       shell: |
         df -P --output=pcent -x tmpfs -x devtmpfs \
         | tail -n +2 | tr -d '%' | sort -n | tail -1
@@ -67,7 +67,7 @@
         k3s_storage_gb: "{{ k3s_raw.stdout | int }}"
 
     ######################
-    # STATUS EVALUATION
+    # STATUS EVALUATION (FIXED)
     ######################
 
     - name: Determine host status
@@ -75,24 +75,24 @@
         host_status: >-
           {{
             'FAIL'
-            if cpu_used > cpu_threshold
-            or memory_used > memory_threshold
-            or disk_used > disk_threshold
-            or k3s_storage_gb > k3s_storage_threshold_gb
+            if (cpu_used | float) > (cpu_threshold | float)
+            or (memory_used | float) > (memory_threshold | float)
+            or (disk_used | int) > (disk_threshold | int)
+            or (k3s_storage_gb | int) > (k3s_storage_threshold_gb | int)
             else 'OK'
           }}
 
     ######################
-    # SAVE SUMMARY
+    # SAVE PER-HOST SUMMARY
     ######################
 
     - name: Save host monitoring summary
       set_fact:
         monitoring_summary:
-          cpu: "{{ '%.1f' | format(cpu_used) }}"
-          memory: "{{ '%.1f' | format(memory_used) }}"
-          disk: "{{ disk_used }}"
-          k3s: "{{ k3s_storage_gb }}"
+          cpu: "{{ '%.1f' | format(cpu_used | float) }}"
+          memory: "{{ '%.1f' | format(memory_used | float) }}"
+          disk: "{{ disk_used | int }}"
+          k3s: "{{ k3s_storage_gb | int }}"
           status: "{{ host_status }}"
 
     ######################
@@ -130,14 +130,14 @@
         msg: "{{ consolidated_report }}"
 
     ######################
-    # FAIL IF ANY HOST FAILED
+    # FAIL PLAY IF ANY HOST FAILED
     ######################
 
     - name: Fail play if any host exceeded thresholds
       run_once: true
       delegate_to: localhost
       fail:
-        msg: "One or more hosts exceeded resource thresholds. Check the summary above."
+        msg: "One or more hosts exceeded resource thresholds. See consolidated report above."
       when: >
         groups['all']
         | map('extract', hostvars, 'monitoring_summary')
