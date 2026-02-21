@@ -21,9 +21,9 @@
       register: cpu_usage
       changed_when: false
 
-    - name: Normalize CPU value
+    - name: Normalize CPU
       set_fact:
-        cpu_used_f: "{{ cpu_usage.stdout | float }}"
+        cpu_used: "{{ cpu_usage.stdout | float }}"
         cpu_status: "{{ '🔴 FAIL' if (cpu_usage.stdout | float) > cpu_threshold else '🟢 OK' }}"
 
 
@@ -36,9 +36,9 @@
       register: memory_usage
       changed_when: false
 
-    - name: Normalize memory value
+    - name: Normalize memory
       set_fact:
-        memory_used_f: "{{ memory_usage.stdout | float }}"
+        memory_used: "{{ memory_usage.stdout | float }}"
         memory_status: "{{ '🔴 FAIL' if (memory_usage.stdout | float) > memory_threshold else '🟢 OK' }}"
 
 
@@ -46,16 +46,16 @@
     # DISK
     ######################
 
-    - name: Get disk usage (host only)
+    - name: Get disk usage (host filesystems only)
       shell: |
         df -h --output=pcent -x tmpfs -x devtmpfs -x overlay -x squashfs \
         | tail -n +2 | tr -d '%'
       register: disk_usage
       changed_when: false
 
-    - name: Normalize disk usage
+    - name: Normalize disk
       set_fact:
-        disk_used_max_i: "{{ disk_usage.stdout_lines | map('int') | max | default(0) }}"
+        disk_used_max: "{{ disk_usage.stdout_lines | map('int') | max | default(0) }}"
         disk_status: "{{ '🔴 FAIL' if (disk_usage.stdout_lines | map('int') | max | default(0)) > disk_threshold else '🟢 OK' }}"
 
 
@@ -70,21 +70,21 @@
 
     - name: Normalize K3s storage
       set_fact:
-        k3s_storage_gb_i: "{{ k3s_storage_raw.stdout | int }}"
+        k3s_storage_gb: "{{ k3s_storage_raw.stdout | int }}"
         k3s_status: "{{ '🔴 FAIL' if (k3s_storage_raw.stdout | int) > k3s_storage_threshold_gb else '🟢 OK' }}"
 
 
     ######################
-    # HOST SUMMARY
+    # HOST SUMMARY (NO round())
     ######################
 
     - name: Save host monitoring summary
       set_fact:
         monitoring_summary:
-          cpu: "{{ cpu_used_f | round(1) }}"
-          memory: "{{ memory_used_f | round(1) }}"
-          disk: "{{ disk_used_max_i }}"
-          k3s: "{{ k3s_storage_gb_i }}"
+          cpu: "{{ '%.1f' | format(cpu_used | float) }}"
+          memory: "{{ '%.1f' | format(memory_used | float) }}"
+          disk: "{{ disk_used_max | int }}"
+          k3s: "{{ k3s_storage_gb | int }}"
           status: >-
             {{
               '🔴 FAIL'
@@ -115,7 +115,7 @@
     # FINAL FAIL (AFTER REPORT)
     ######################
 
-    - name: Fail play if any host is in FAIL state
+    - name: Fail play if any host exceeded thresholds
       run_once: true
       delegate_to: localhost
       fail:
