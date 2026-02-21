@@ -75,7 +75,7 @@
 
 
     ######################
-    # HOST SUMMARY (NO round())
+    # HOST SUMMARY (AWX-SAFE)
     ######################
 
     - name: Save host monitoring summary
@@ -112,17 +112,30 @@
 
 
     ######################
-    # FINAL FAIL (AFTER REPORT)
+    # FINAL FAIL (LOOP-BASED, AWX-SAFE)
     ######################
+
+    - name: Initialize failed hosts list
+      run_once: true
+      delegate_to: localhost
+      set_fact:
+        failed_hosts: []
+
+    - name: Collect failed hosts
+      run_once: true
+      delegate_to: localhost
+      set_fact:
+        failed_hosts: "{{ failed_hosts + [item] }}"
+      loop: "{{ groups['all'] }}"
+      when: hostvars[item].monitoring_summary.status == '🔴 FAIL'
 
     - name: Fail play if any host exceeded thresholds
       run_once: true
       delegate_to: localhost
       fail:
-        msg: "🚨 One or more hosts exceeded resource thresholds. See summary table above."
-      when: >
-        groups['all']
-        | select('extract', hostvars, 'monitoring_summary')
-        | selectattr('status', 'equalto', '🔴 FAIL')
-        | list
-        | length > 0
+        msg: |
+          🚨 One or more hosts exceeded resource thresholds.
+
+          Failed hosts:
+          {{ failed_hosts | join(', ') }}
+      when: failed_hosts | length > 0
