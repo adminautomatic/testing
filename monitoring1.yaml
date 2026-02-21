@@ -13,101 +13,65 @@
   tasks:
 
     ######################
-    # CPU MONITORING
+    # CPU
     ######################
 
     - name: Get CPU usage
-      shell: |
-        top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8}'
+      shell: top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8}'
       register: cpu_usage
       changed_when: false
 
-    - name: Set CPU usage fact
-      set_fact:
+    - set_fact:
         cpu_used: "{{ cpu_usage.stdout | float }}"
-
-    - name: Fail if CPU usage is high
-      fail:
-        msg: "❌ CPU usage high: {{ cpu_used | round(1) }}% (Threshold: {{ cpu_threshold }}%)"
-      when: cpu_used > cpu_threshold
+        cpu_status: "{{ '🔴 FAIL' if (cpu_usage.stdout | float) > cpu_threshold else '🟢 OK' }}"
 
 
     ######################
-    # MEMORY MONITORING
+    # MEMORY
     ######################
 
     - name: Get memory usage
-      shell: |
-        free | awk '/Mem:/ { printf("%.2f"), $3/$2 * 100 }'
+      shell: free | awk '/Mem:/ { printf("%.2f"), $3/$2 * 100 }'
       register: memory_usage
       changed_when: false
 
-    - name: Set memory usage fact
-      set_fact:
+    - set_fact:
         memory_used: "{{ memory_usage.stdout | float }}"
-
-    - name: Fail if memory usage is high
-      fail:
-        msg: "❌ Memory usage high: {{ memory_used | round(1) }}% (Threshold: {{ memory_threshold }}%)"
-      when: memory_used > memory_threshold
+        memory_status: "{{ '🔴 FAIL' if (memory_usage.stdout | float) > memory_threshold else '🟢 OK' }}"
 
 
     ######################
-    # DISK MONITORING
+    # DISK
     ######################
 
-    - name: Get disk usage (host filesystems only)
+    - name: Get disk usage
       shell: |
-        df -h --output=pcent,target -x tmpfs -x devtmpfs -x overlay -x squashfs \
-        | grep -vE '/run/k3s|/containerd/runtime.v2.task' \
-        | tail -n +2
+        df -h --output=pcent -x tmpfs -x devtmpfs -x overlay -x squashfs \
+        | tail -n +2 | tr -d '%'
       register: disk_usage
       changed_when: false
 
-    - name: Parse disk usage percentages
-      set_fact:
-        disk_usage_list: >-
-          {{
-            disk_usage.stdout_lines
-            | map('regex_replace', '%', '')
-            | map('split')
-            | map('first')
-            | map('int')
-            | list
-          }}
-
-    - name: Set max disk usage
-      set_fact:
-        disk_used_max: "{{ disk_usage_list | max | default(0) }}"
-
-    - name: Fail if disk usage is high
-      fail:
-        msg: "❌ Disk usage high: {{ disk_used_max }}% (Threshold: {{ disk_threshold }}%)"
-      when: disk_used_max > disk_threshold
+    - set_fact:
+        disk_used_max: "{{ disk_usage.stdout_lines | map('int') | max | default(0) }}"
+        disk_status: "{{ '🔴 FAIL' if (disk_usage.stdout_lines | map('int') | max | default(0)) > disk_threshold else '🟢 OK' }}"
 
 
     ######################
-    # K3s CONTAINERD STORAGE
+    # K3s STORAGE
     ######################
 
-    - name: Get K3s containerd storage usage in GB
-      shell: |
-        du -s --block-size=1G /var/lib/rancher/k3s/agent/containerd 2>/dev/null | awk '{print $1}' || echo 0
+    - name: Get K3s containerd storage usage (GB)
+      shell: du -s --block-size=1G /var/lib/rancher/k3s/agent/containerd 2>/dev/null | awk '{print $1}' || echo 0
       register: k3s_storage_raw
       changed_when: false
 
-    - name: Set K3s storage fact
-      set_fact:
+    - set_fact:
         k3s_storage_gb: "{{ k3s_storage_raw.stdout | int }}"
-
-    - name: Fail if K3s storage is high
-      fail:
-        msg: "❌ K3s containerd storage high: {{ k3s_storage_gb }} GB (Threshold: {{ k3s_storage_threshold_gb }} GB)"
-      when: k3s_storage_gb > k3s_storage_threshold_gb
+        k3s_status: "{{ '🔴 FAIL' if (k3s_storage_raw.stdout | int) > k3s_storage_threshold_gb else '🟢 OK' }}"
 
 
     ######################
-    # SAVE PER-HOST SUMMARY
+    # HOST SUMMARY
     ######################
 
     - name: Save host monitoring summary
@@ -117,6 +81,12 @@
           memory: "{{ memory_used | round(1) }}"
           disk: "{{ disk_used_max }}"
           k3s: "{{ k3s_storage_gb }}"
+          status: >-
+            {{
+              '🔴 FAIL'
+              if 'FAIL' in [cpu_status, memory_status, disk_status, k3s_status]
+              else '🟢 OK'
+            }}
 
 
     ######################
@@ -130,8 +100,25 @@
         msg: |
           ## 📊 K3s Cluster Resource Usage Summary
 
-          | Hostname | CPU (%) | Memory (%) | Disk (%) | K3s Storage (GB) |
-          |----------|---------|------------|----------|------------------|
+          | Hostname | CPU % | MEM % | DISK % | K3s GB | Status |
+          |----------|-------|-------|--------|--------|--------|
           {% for host in groups['all'] -%}
-          | {{ host }} | {{ hostvars[host].monitoring_summary.cpu }} | {{ hostvars[host].monitoring_summary.memory }} | {{ hostvars[host].monitoring_summary.disk }} | {{ hostvars[host].monitoring_summary.k3s }} |
+          | {{ host }} | {{ hostvars[host].monitoring_summary.cpu }} | {{ hostvars[host].monitoring_summary.memory }} | {{ hostvars[host].monitoring_summary.disk }} | {{ hostvars[host].monitoring_summary.k3s }} | {{ hostvars[host].monitoring_summary.status }} |
           {% endfor %}
+
+
+    ######################
+    # FINAL FAIL (IF NEEDED)
+    ######################
+
+    - name: Fail play if any host is in FAIL state
+      run_once: true
+      delegate_to: localhost
+      fail:
+        msg: "🚨 One or more hosts exceeded resource thresholds. See summary table above."
+      when: >
+        groups['all']
+        | select('extract', hostvars, 'monitoring_summary')
+        | selectattr('status', 'equalto', '🔴 FAIL')
+        | list
+        | length > 0
