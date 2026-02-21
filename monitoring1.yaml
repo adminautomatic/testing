@@ -1,14 +1,14 @@
 ---
-- name: Monitor CPU, Memory, and Disk Usage on K3s Node
+- name: Monitor CPU, Memory, Disk, and K3s Storage on Nodes
   hosts: all
   become: yes
   gather_facts: no
 
   vars:
-    cpu_threshold: 80          # %
-    memory_threshold: 80       # %
-    disk_threshold: 80         # %
-    k3s_storage_threshold_gb: 10  # Alert if > this GB
+    cpu_threshold: 80              # %
+    memory_threshold: 80           # %
+    disk_threshold: 80             # %
+    k3s_storage_threshold_gb: 10    # GB
 
   tasks:
 
@@ -24,16 +24,12 @@
 
     - name: Set CPU usage fact
       set_fact:
-        cpu_used: "{{ cpu_usage.stdout | float(0) }}"
-
-    - name: Display current CPU usage
-      debug:
-        msg: "Current CPU usage: {{ cpu_used | float | round(1) }}% (Threshold: {{ cpu_threshold }}%)"
+        cpu_used: "{{ cpu_usage.stdout | float | round(1) }}"
 
     - name: Fail if CPU usage is high
       fail:
         msg: "CPU usage high: {{ cpu_used }}% (Threshold: {{ cpu_threshold }}%)"
-      when: cpu_used | float > cpu_threshold
+      when: cpu_used > cpu_threshold
 
 
     ######################
@@ -48,59 +44,98 @@
 
     - name: Set memory usage fact
       set_fact:
-        memory_used: "{{ memory_usage.stdout | float(0) }}"
-
-    - name: Display current memory usage
-      debug:
-        msg: "Current Memory usage: {{ memory_used | float | round(2) }}% (Threshold: {{ memory_threshold }}%)"
+        memory_used: "{{ memory_usage.stdout | float | round(1) }}"
 
     - name: Fail if memory usage is high
       fail:
         msg: "Memory usage high: {{ memory_used }}% (Threshold: {{ memory_threshold }}%)"
-      when: memory_used | float > memory_threshold
+      when: memory_used > memory_threshold
 
 
     ######################
-    # DISK MONITORING (Host Filesystems Only - Exclude squashfs/snaps)
+    # DISK MONITORING
     ######################
 
-    - name: Get disk usage (exclude tmpfs, devtmpfs, overlay, squashfs, and K3s paths)
+    - name: Get disk usage (host filesystems only)
       shell: |
         df -h --output=pcent,target -x tmpfs -x devtmpfs -x overlay -x squashfs \
-          | grep -vE '/run/k3s|/containerd/runtime.v2.task' \
-          | tail -n +2
+        | grep -vE '/run/k3s|/containerd/runtime.v2.task' \
+        | tail -n +2
       register: disk_usage
       changed_when: false
-      failed_when: disk_usage.rc != 0 and 'No such file' not in disk_usage.stderr | default('')
 
-    - name: Check disk usage thresholds on host filesystems
-      fail:
-        msg: "Disk usage high on {{ item.split()[-1] }}: {{ item.split()[0] }} (Threshold: {{ disk_threshold }}%)"
-      loop: "{{ disk_usage.stdout_lines | default([]) }}"
-      when: 
-        - disk_usage.stdout_lines | default([]) | length > 0
-        - (item.split()[0].rstrip('%') | int > disk_threshold)
-
-
-    ######################
-    # K3s Containerd Storage Check (Real Heavy User)
-    ######################
-
-    - name: Get K3s containerd storage usage
-      shell: |
-        du -sh /var/lib/rancher/k3s/agent/containerd 2>/dev/null | awk '{print $1}' || echo "0K"
-      register: k3s_storage
-      changed_when: false
-
-    - name: Convert K3s storage to GB
+    - name: Determine highest disk usage %
       set_fact:
-        k3s_storage_gb: >-
+        disk_used_max: >-
           {{
-            (k3s_storage.stdout | regex_replace('[^0-9.]', '')) | float
-            if (k3s_storage.stdout | regex_search('[0-9.]+')) else 0.0
+            disk_usage.stdout_lines
+            | map('regex_replace', '%', '')
+            | map('split')
+            | map('first')
+            | map('int')
+            | max(default=0)
           }}
 
-    - name: Fail if K3s containerd storage is high
+    - name: Fail if disk usage is high
       fail:
-        msg: "K3s containerd storage high: {{ k3s_storage.stdout }} (~{{ k3s_storage_gb | round(1) }} GB) - Check images/snapshots/logs (Threshold: {{ k3s_storage_threshold_gb }} GB)"
-      when: k3s_storage_gb | float > k3s_storage_threshold_gb
+        msg: "Disk usage high: {{ disk_used_max }}% (Threshold: {{ disk_threshold }}%)"
+      when: disk_used_max > disk_threshold
+
+
+    ######################
+    # K3s CONTAINERD STORAGE
+    ######################
+
+    - name: Get K3s containerd storage usage in GB
+      shell: |
+        du -s --block-size=1G /var/lib/rancher/k3s/agent/containerd 2>/dev/null | awk '{print $1}' || echo 0
+      register: k3s_storage_gb_raw
+      changed_when: false
+
+    - name: Set K3s storage fact
+      set_fact:
+        k3s_storage_gb: "{{ k3s_storage_gb_raw.stdout | int }}"
+
+    - name: Fail if K3s storage is high
+      fail:
+        msg: "K3s containerd storage high: {{ k3s_storage_gb }} GB (Threshold: {{ k3s_storage_threshold_gb }} GB)"
+      when: k3s_storage_gb > k3s_storage_threshold_gb
+
+
+    ######################
+    # SAVE STATS FOR SUMMARY
+    ######################
+
+    - name: Save monitoring stats
+      set_stats:
+        data:
+          monitoring_summary:
+            "{{ inventory_hostname }}":
+              cpu: "{{ cpu_used }}"
+              memory: "{{ memory_used }}"
+              disk: "{{ disk_used_max }}"
+              k3s: "{{ k3s_storage_gb }}"
+
+
+    ######################
+    # CONSOLIDATED REPORT
+    ######################
+
+    - name: Display consolidated resource usage table
+      run_once: true
+      delegate_to: localhost
+      debug:
+        msg: |
+          ======================================================
+          K3s Cluster Resource Usage Summary
+          ======================================================
+          Hostname              CPU%    MEM%    DISK%   K3s(GB)
+          ------------------------------------------------------
+          {% for host, data in ansible_stats.data.monitoring_summary.items() %}
+          {{ "%-20s" | format(host) }}
+          {{ "%-7s"  | format(data.cpu) }}
+          {{ "%-7s"  | format(data.memory) }}
+          {{ "%-7s"  | format(data.disk) }}
+          {{ "%-7s"  | format(data.k3s) }}
+          {% endfor %}
+          ======================================================
