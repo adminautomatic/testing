@@ -19,61 +19,62 @@
     disk_threshold: 80
     k3s_storage_threshold_gb: 10
   tasks:
-    - name: Get CPU usage (100 - idle %)
+    - name: Get CPU usage safely
       ansible.builtin.shell: "top -bn1 | grep -i 'cpu(s)' | awk '{print 100 - $8}'"
       register: cpu_raw
+      ignore_errors: true
       changed_when: false
       check_mode: false
 
     - name: Set CPU facts
       ansible.builtin.set_fact:
         cpu_used_pct: "{{ cpu_raw.stdout | float | default(0) }}"
-        cpu_over_threshold: "{{ (cpu_raw.stdout | float | default(0)) > cpu_threshold }}"
+        cpu_over_threshold: "{{ cpu_raw.stdout | float(default=0) > cpu_threshold }}"
 
-    - name: Get memory usage percentage
+    - name: Get memory usage safely
       ansible.builtin.shell: "free | awk '/^Mem:/ {printf \"%.1f\", ($3/$2)*100}'"
       register: mem_raw
+      ignore_errors: true
       changed_when: false
       check_mode: false
 
     - name: Set memory facts
       ansible.builtin.set_fact:
         memory_used_pct: "{{ mem_raw.stdout | float | default(0) }}"
-        memory_over_threshold: "{{ (mem_raw.stdout | float | default(0)) > memory_threshold }}"
+        memory_over_threshold: "{{ mem_raw.stdout | float(default=0) > memory_threshold }}"
 
-    - name: Get filesystem usage (skip tmpfs/loop/overlay)
+    - name: Get filesystem usage safely
       ansible.builtin.shell: >
         df -hP | awk 'NR>1 && $1 !~ /^(tmpfs|devtmpfs|overlay)$/ && $NF !~ /^\/dev\/loop/ {print $NF " " $5}'
       register: fs_raw
+      ignore_errors: true
       changed_when: false
       check_mode: false
 
     - name: Calculate max disk usage and fail flag
       ansible.builtin.set_fact:
         disk_percentages: >-
-          {{ fs_raw.stdout_lines | default([])
-             | map('split')
-             | map('last')
-             | map('regex_replace', '%', '')
+          {{ fs_raw.stdout_lines | default([]) 
+             | map('split') 
+             | map('last') 
+             | map('regex_replace', '%', '') 
              | map('int') | list }}
-        disk_used_max_pct: >-
-          {{ disk_percentages | default([0]) | max }}
-        disk_over_threshold: >-
-          {{ (disk_percentages | default([0]) | max) > disk_threshold }}
+        disk_used_max_pct: "{{ disk_percentages | default([0]) | max }}"
+        disk_over_threshold: "{{ (disk_percentages | default([0]) | max) > disk_threshold }}"
 
     - name: Build filesystem list for report
       ansible.builtin.set_fact:
         filesystem_usage: >-
-          {{ fs_raw.stdout_lines | default([])
-             | map('split', ' ', 1)
+          {{ fs_raw.stdout_lines | default([]) 
+             | map('split', ' ', 1) 
              | map('community.general.dict_kv', keys=['mount','usage']) | list }}
 
-    - name: Get k3s containerd storage usage (GB) - safe if missing
+    - name: Get k3s containerd storage usage safely
       ansible.builtin.shell: "du -sx --block-size=1G /var/lib/rancher/k3s/agent/containerd 2>/dev/null | cut -f1 || echo 0"
       register: k3s_raw
+      ignore_errors: true
       changed_when: false
       check_mode: false
-      ignore_errors: true
 
     - name: Set k3s facts
       ansible.builtin.set_fact:
@@ -122,7 +123,7 @@
           {% endfor %}
           {% endfor %}
 
-    - name: Collect failed hosts (robust against missing facts)
+    - name: Collect failed hosts
       ansible.builtin.set_fact:
         failed_hosts: >-
           {{ hostvars
