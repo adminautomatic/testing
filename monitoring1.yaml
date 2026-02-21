@@ -3,17 +3,24 @@
   hosts: all
   become: yes
   gather_facts: no
-
+- hosts: localhost
+  gather_facts: no
+  tasks:
+    - set_fact:
+        monitoring_controller: true
   vars:
     cpu_threshold: 80
     memory_threshold: 80
     disk_threshold: 80
     k3s_storage_threshold_gb: 10
 
+- hosts: localhost
+  gather_facts: no
   tasks:
-
-    ######################
-    # CPU
+    - set_fact:
+        monitoring_controller: true
+#################    
+# CPU
     ######################
 
     - name: Get CPU usage
@@ -159,13 +166,12 @@
         failed_hosts: "{{ failed_hosts + [item] }}"
       loop: "{{ groups['all'] }}"
       when: hostvars[item].monitoring_summary.failed
+- name: Fail if any host exceeded thresholds
+  run_once: true
+  delegate_to: localhost
+  failed_when: failed_hosts | length > 0
+  debug:
+    msg: |
+      🚨 Resource thresholds exceeded on the following hosts:
 
-    - name: Fail if any host exceeded thresholds
-      run_once: true
-      delegate_to: localhost
-      fail:
-        msg: |
-          🚨 Resource thresholds exceeded on the following hosts:
-
-          {{ failed_hosts | join(', ') }}
-      when: failed_hosts | length > 0
+      {{ failed_hosts | join(', ') }}
