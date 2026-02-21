@@ -32,7 +32,7 @@
     ######################
 
     - name: Get memory usage
-      shell: free | awk '/Mem:/ { printf("%.2f"), $3/$2 * 100 }'
+      shell: free | awk '/Mem:/ { printf(\"%.2f\"), $3/$2 * 100 }'
       register: memory_usage
       changed_when: false
 
@@ -94,32 +94,32 @@
 
 
     ######################
-    # CONSOLIDATED REPORT
+    # CONSOLIDATED REPORT (AWX-SAFE)
     ######################
 
     - name: Display consolidated resource usage table
       run_once: true
       delegate_to: localhost
       debug:
-        msg: |
-          ============================================================
-          📊 K3s Cluster Resource Usage Summary
-          ============================================================
-          Hostname                              CPU%   MEM%   DISK%   K3sGB   Status
-          ------------------------------------------------------------
+        msg:
+          - "============================================================"
+          - "📊 K3s Cluster Resource Usage Summary"
+          - "============================================================"
+          - "Hostname                              CPU%   MEM%   DISK%   K3sGB   Status"
+          - "------------------------------------------------------------"
           {% for host in groups['all'] %}
-          {{ "%-36s %5s %6s %7s %7s   %s"
-             | format(
-                 host,
-                 hostvars[host].monitoring_summary.cpu,
-                 hostvars[host].monitoring_summary.memory,
-                 hostvars[host].monitoring_summary.disk,
-                 hostvars[host].monitoring_summary.k3s,
-                 hostvars[host].monitoring_summary.status
-               )
-          }}
+          - "{{ '%-36s %5s %6s %7s %7s   %s'
+                | format(
+                    host,
+                    hostvars[host].monitoring_summary.cpu,
+                    hostvars[host].monitoring_summary.memory,
+                    hostvars[host].monitoring_summary.disk,
+                    hostvars[host].monitoring_summary.k3s,
+                    hostvars[host].monitoring_summary.status
+                  )
+            }}"
           {% endfor %}
-          ============================================================
+          - "============================================================"
 
 
     ######################
