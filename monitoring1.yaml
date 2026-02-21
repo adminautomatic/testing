@@ -28,7 +28,7 @@
 
     - name: Fail if CPU usage is high
       fail:
-        msg: "CPU usage high: {{ cpu_used | round(1) }}% (Threshold: {{ cpu_threshold }}%)"
+        msg: "CPU usage high: {{ cpu_used | float | round(1) }}% (Threshold: {{ cpu_threshold }}%)"
       when: (cpu_used | float) > (cpu_threshold | float)
 
 
@@ -48,7 +48,7 @@
 
     - name: Fail if memory usage is high
       fail:
-        msg: "Memory usage high: {{ memory_used | round(1) }}% (Threshold: {{ memory_threshold }}%)"
+        msg: "Memory usage high: {{ memory_used | float | round(1) }}% (Threshold: {{ memory_threshold }}%)"
       when: (memory_used | float) > (memory_threshold | float)
 
 
@@ -121,8 +121,8 @@
         data:
           monitoring_summary:
             "{{ inventory_hostname }}":
-              cpu: "{{ cpu_used | round(1) }}"
-              memory: "{{ memory_used | round(1) }}"
+              cpu: "{{ cpu_used | float | round(1) }}"
+              memory: "{{ memory_used | float | round(1) }}"
               disk: "{{ disk_used_max }}"
               k3s: "{{ k3s_storage_gb }}"
 
