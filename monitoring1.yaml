@@ -113,7 +113,7 @@
 
 
     ######################
-    # SAVE PER-HOST SUMMARY (FACT)
+    # SAVE PER-HOST SUMMARY
     ######################
 
     - name: Save host monitoring summary
@@ -137,13 +137,17 @@
           ======================================================
           K3s Cluster Resource Usage Summary
           ======================================================
-          Hostname              CPU%    MEM%    DISK%   K3s(GB)
+          Hostname                     CPU%    MEM%    DISK%   K3s(GB)
           ------------------------------------------------------
           {% for host in groups['all'] %}
-          {{ "%-20s" | format(host) }}
-          {{ "%-7s" | format(hostvars[host].monitoring_summary.cpu) }}
-          {{ "%-7s" | format(hostvars[host].monitoring_summary.memory) }}
-          {{ "%-7s" | format(hostvars[host].monitoring_summary.disk) }}
-          {{ "%-7s" | format(hostvars[host].monitoring_summary.k3s) }}
+          {{ "%-28s %-7.1f %-7.1f %-7d %-7d"
+             | format(
+                 host,
+                 hostvars[host].monitoring_summary.cpu | float,
+                 hostvars[host].monitoring_summary.memory | float,
+                 hostvars[host].monitoring_summary.disk | int,
+                 hostvars[host].monitoring_summary.k3s | int
+               )
+          }}
           {% endfor %}
           ======================================================
