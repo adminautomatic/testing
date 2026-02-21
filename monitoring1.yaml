@@ -43,7 +43,7 @@
 
 
     ######################
-    # FILESYSTEMS
+    # FILESYSTEMS + DISK
     ######################
 
     - name: Get filesystem usage
@@ -59,17 +59,10 @@
         filesystems: []
         disk_used_max: 0
 
-    - name: Parse filesystem usage safely
+    - name: Parse filesystem usage (AWX-safe)
       set_fact:
-        filesystems: "{{ filesystems + [ { 'mount': fs_parts[0], 'usage': fs_parts[1] } ] }}"
-        disk_used_max: >-
-          {{
-            fs_percent > disk_used_max
-            | ternary(fs_percent, disk_used_max)
-          }}
-      vars:
-        fs_parts: "{{ item.split() }}"
-        fs_percent: "{{ item.split()[1] | regex_replace('%','') | int }}"
+        filesystems: "{{ filesystems + [ { 'mount': item.split()[0], 'usage': item.split()[1] } ] }}"
+        disk_used_max: "{{ (item.split()[1] | regex_replace('%','') | int) if (item.split()[1] | regex_replace('%','') | int) > disk_used_max else disk_used_max }}"
       loop: "{{ fs_raw.stdout_lines }}"
 
     - name: Evaluate disk status
@@ -101,8 +94,8 @@
     - name: Build host monitoring summary
       set_fact:
         monitoring_summary:
-          cpu: "{{ '%.1f' | format(cpu_used) }}"
-          memory: "{{ '%.1f' | format(memory_used) }}"
+          cpu: "{{ cpu_used }}"
+          memory: "{{ memory_used }}"
           disk: "{{ disk_used_max }}"
           k3s: "{{ k3s_storage_gb }}"
           failed: "{{ cpu_fail or memory_fail or disk_fail or k3s_fail }}"
