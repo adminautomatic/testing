@@ -134,9 +134,15 @@
           </body>
           </html>
 
+    - name: Write HTML email to temp file
+      ansible.builtin.copy:
+        content: "{{ html_email_body }}"
+        dest: /tmp/filesystem_alert.html
+        mode: '0644'
+
     - name: Send HTML email using msmtp
       ansible.builtin.shell: |
-        printf '%s\n' "{{ html_email_body }}" | msmtp -t
+        msmtp -t < /tmp/filesystem_alert.html
       args:
         executable: /bin/bash
       changed_when: false
