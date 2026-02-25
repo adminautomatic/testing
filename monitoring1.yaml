@@ -142,7 +142,7 @@
 
     - name: Send HTML email using msmtp
       ansible.builtin.shell: |
-        msmtp -t < /tmp/filesystem_alert.html
+        /usr/bin/msmtp -t < /tmp/filesystem_alert.html
       args:
         executable: /bin/bash
       changed_when: false
