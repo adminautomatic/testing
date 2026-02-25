@@ -107,6 +107,40 @@
   gather_facts: false
   run_once: true
   tasks:
+    - name: Build HTML email body
+      ansible.builtin.set_fact:
+        html_email_body: |
+          Subject: 🚨 Filesystem Threshold Alert
+          To: krishnakumar.subramanian@ibm.com
+          MIME-Version: 1.0
+          Content-Type: text/html; charset=UTF-8
+
+          <html>
+          <body style="font-family: Arial, sans-serif;">
+            <h2 style="color:red;">Filesystem Threshold Alert</h2>
+            <p>Filesystems exceeding <b>80%</b>:</p>
+
+            {% for host in groups['all'] | sort %}
+              {% set fs_warn = hostvars[host].filesystem_usage | selectattr('over_threshold') | list %}
+              {% if fs_warn | length > 0 %}
+                <h3>{{ host }}</h3>
+                <ul>
+                  {% for fs in fs_warn %}
+                    <li>{{ fs.mount }} — {{ fs.usage }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            {% endfor %}
+          </body>
+          </html>
+
+    - name: Send HTML email using msmtp
+      ansible.builtin.shell: |
+        printf '%s\n' "{{ html_email_body }}" | msmtp -t
+      args:
+        executable: /bin/bash
+      changed_when: false
+
     - name: Collect failed hosts
       ansible.builtin.set_fact:
         failed_hosts: >-
@@ -117,44 +151,10 @@
              | map(attribute='key')
              | list }}
 
-    - name: Build HTML email body
-      ansible.builtin.set_fact:
-        html_email: |
-          Subject: 🚨 Filesystem Threshold Alert
-          To: krishnakumar.subramanian@ibm.com
-          MIME-Version: 1.0
-          Content-Type: text/html; charset=UTF-8
-
-          <html>
-          <body>
-            <h2 style="color:red;">Filesystem Threshold Alert</h2>
-            <p>Filesystems exceeding <b>{{ hostvars[groups['all'][0]].filesystem_threshold | default(80) }}%</b>:</p>
-
-            {% for host in groups['all'] %}
-            {% set fs_list = hostvars[host].filesystem_usage | selectattr('over_threshold') | list %}
-            {% if fs_list | length > 0 %}
-            <h3>{{ host }}</h3>
-            <ul>
-              {% for fs in fs_list %}
-              <li>{{ fs.mount }} — {{ fs.usage }}</li>
-              {% endfor %}
-            </ul>
-            {% endif %}
-            {% endfor %}
-          </body>
-          </html>
-
-    - name: Send HTML email using msmtp
-      ansible.builtin.shell: |
-        /usr/bin/msmtp -t <<'EOF'
-        {{ html_email }}
-        EOF
-      when: failed_hosts | length > 0
-      changed_when: false
-
     - name: Fail the playbook if any node exceeds thresholds
       ansible.builtin.fail:
         msg: |
           🚨 Resource thresholds exceeded on the following nodes:
-          • {{ failed_hosts | join('\n• ') }}
+
+          • {{ failed_hosts | join('\n• ') | default('none') }}
       when: failed_hosts | length > 0
