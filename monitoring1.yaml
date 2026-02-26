@@ -19,6 +19,7 @@
     disk_threshold: 80
     filesystem_threshold: 80
     k3s_storage_threshold_gb: 10
+
   tasks:
     - name: Get CPU usage safely
       ansible.builtin.shell: "top -bn1 | grep -i 'cpu(s)' | awk '{print 100 - $8}'"
@@ -76,7 +77,8 @@
              | map('split')
              | map('last')
              | map('regex_replace', '%', '')
-             | map('int') | list }}
+             | map('int')
+             | list }}
         disk_used_max_pct: "{{ disk_percentages | default([0]) | max }}"
         disk_over_threshold: "{{ (disk_percentages | default([0]) | max) > disk_threshold }}"
 
@@ -106,6 +108,7 @@
   connection: local
   gather_facts: false
   run_once: true
+
   tasks:
     - name: Build HTML email body
       ansible.builtin.set_fact:
@@ -117,34 +120,28 @@
 
           <html>
           <body style="font-family: Arial, sans-serif;">
-            <h2 style="color:red;">Filesystem Threshold Alert</h2>
-            <p>Filesystems exceeding <b>80%</b>:</p>
+          <h2 style="color:red;">Filesystem Threshold Alert</h2>
+          <p>Filesystems exceeding <b>80%</b>:</p>
 
-            {% for host in groups['all'] | sort %}
-              {% set fs_warn = hostvars[host].filesystem_usage | selectattr('over_threshold') | list %}
-              {% if fs_warn | length > 0 %}
-                <h3>{{ host }}</h3>
-                <ul>
-                  {% for fs in fs_warn %}
-                    <li>{{ fs.mount }} — {{ fs.usage }}</li>
-                  {% endfor %}
-                </ul>
-              {% endif %}
-            {% endfor %}
+          {% for host in groups['all'] | sort %}
+          {% set fs_warn = hostvars[host].filesystem_usage | selectattr('over_threshold') | list %}
+          {% if fs_warn | length > 0 %}
+          <h3>{{ host }}</h3>
+          <ul>
+          {% for fs in fs_warn %}
+            <li>{{ fs.mount }} — {{ fs.usage }}</li>
+          {% endfor %}
+          </ul>
+          {% endif %}
+          {% endfor %}
+
           </body>
           </html>
 
-    - name: Write HTML email to temp file
-      ansible.builtin.copy:
-        content: "{{ html_email_body }}"
-        dest: /tmp/filesystem_alert.html
-        mode: '0644'
-
     - name: Send HTML email using msmtp
-      ansible.builtin.shell: |
-        /usr/bin/msmtp -t < /tmp/filesystem_alert.html
+      ansible.builtin.command: msmtp -t
       args:
-        executable: /bin/bash
+        stdin: "{{ html_email_body }}"
       changed_when: false
 
     - name: Collect failed hosts
@@ -161,6 +158,5 @@
       ansible.builtin.fail:
         msg: |
           🚨 Resource thresholds exceeded on the following nodes:
-
           • {{ failed_hosts | join('\n• ') | default('none') }}
       when: failed_hosts | length > 0
