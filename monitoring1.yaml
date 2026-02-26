@@ -19,7 +19,6 @@
     disk_threshold: 80
     filesystem_threshold: 80
     k3s_storage_threshold_gb: 10
-
   tasks:
     - name: Get CPU usage safely
       ansible.builtin.shell: "top -bn1 | grep -i 'cpu(s)' | awk '{print 100 - $8}'"
@@ -77,8 +76,7 @@
              | map('split')
              | map('last')
              | map('regex_replace', '%', '')
-             | map('int')
-             | list }}
+             | map('int') | list }}
         disk_used_max_pct: "{{ disk_percentages | default([0]) | max }}"
         disk_over_threshold: "{{ (disk_percentages | default([0]) | max) > disk_threshold }}"
 
@@ -108,41 +106,33 @@
   connection: local
   gather_facts: false
   run_once: true
-
   tasks:
-    - name: Build HTML email body
-      ansible.builtin.set_fact:
-        html_email_body: |
-          Subject: 🚨 Filesystem Threshold Alert
-          To: krishnakumar.subramanian@ibm.com
-          MIME-Version: 1.0
-          Content-Type: text/html; charset=UTF-8
+    - name: Display cluster resource summary
+      ansible.builtin.debug:
+        msg: |
+          ## Cluster Resource Summary
 
-          <html>
-          <body style="font-family: Arial, sans-serif;">
-          <h2 style="color:red;">Filesystem Threshold Alert</h2>
-          <p>Filesystems exceeding <b>80%</b>:</p>
+          | Host                  | CPU % | Mem % | Disk % | k3s GB | Status |
+          |:----------------------|------:|------:|-------:|-------:|--------|
+          {% for host in groups['all'] | sort %}
+          | {{ host | truncate(21) }} | {{ hostvars[host].monitoring_summary.cpu | default('n/a') }} | {{ hostvars[host].monitoring_summary.memory | default('n/a') }} | {{ hostvars[host].monitoring_summary.disk | default('n/a') }} | {{ hostvars[host].monitoring_summary.k3s | default('n/a') }} | {{ 'FAIL' if hostvars[host].monitoring_summary.failed | default(false) else 'OK' }} |
+          {% endfor %}
+
+    - name: Display detailed filesystem usage with warnings
+      ansible.builtin.debug:
+        msg: |
+          ## Filesystem Usage per Host (warning if ≥ 80%)
 
           {% for host in groups['all'] | sort %}
-          {% set fs_warn = hostvars[host].filesystem_usage | selectattr('over_threshold') | list %}
-          {% if fs_warn | length > 0 %}
-          <h3>{{ host }}</h3>
-          <ul>
-          {% for fs in fs_warn %}
-            <li>{{ fs.mount }} — {{ fs.usage }}</li>
+          ### {{ host }}
+          | Mount Point              | Usage  | Status |
+          |:-------------------------|-------:|--------|
+          {% for fs in hostvars[host].filesystem_usage | default([]) %}
+          | {{ fs.mount | truncate(24) }} | {{ fs.usage }} | {{ '⚠️ WARNING' if fs.over_threshold else 'OK' }} |
+          {% else %}
+          | (no data collected)      | —      | —      |
           {% endfor %}
-          </ul>
-          {% endif %}
           {% endfor %}
-
-          </body>
-          </html>
-
-    - name: Send HTML email using msmtp
-      ansible.builtin.command: msmtp -t
-      args:
-        stdin: "{{ html_email_body }}"
-      changed_when: false
 
     - name: Collect failed hosts
       ansible.builtin.set_fact:
@@ -158,5 +148,6 @@
       ansible.builtin.fail:
         msg: |
           🚨 Resource thresholds exceeded on the following nodes:
+
           • {{ failed_hosts | join('\n• ') | default('none') }}
       when: failed_hosts | length > 0
