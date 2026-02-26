@@ -106,6 +106,15 @@
   connection: local
   gather_facts: false
   run_once: true
+  vars:
+    # ── Customize these ────────────────────────────────────────────────
+    smtp_host: "smtp.ibm.com"               # ← your IBM SMTP server
+    smtp_port: "587"                        # 587 = STARTTLS, 465 = SSL
+    smtp_user: "your-ibm-username@ibm.com"  # ← change
+    smtp_pass: "your-app-specific-password" # ← use ansible-vault in prod!
+    smtp_from: "AWX-Monitoring <awx-monitoring@yourdomain.com>"
+    recipient: "krishnakumar.subramanian@ibm.com"
+    # ───────────────────────────────────────────────────────────────────
   tasks:
     - name: Display cluster resource summary
       ansible.builtin.debug:
@@ -143,6 +152,60 @@
              | selectattr('value.monitoring_summary.failed', 'equalto', true)
              | map(attribute='key')
              | list }}
+
+    - name: Prepare email body (only when there are issues)
+      ansible.builtin.set_fact:
+        email_body: |
+          Subject: [ALERT] Resource Thresholds Exceeded in Cluster
+
+          Hello Krishna,
+
+          The resource monitoring playbook detected issues on one or more nodes.
+
+          Execution time: {{ ansible_date_time.iso8601 }}
+
+          {{ lookup('template', 'cluster_summary.j2') | indent(0) }}
+
+          {{ lookup('template', 'filesystem_details.j2') | indent(0) }}
+
+          Failed nodes:
+          • {{ failed_hosts | join('\n• ') | default('none') }}
+
+          Please investigate promptly.
+
+          Regards,
+          AWX Monitoring
+      when: failed_hosts | length > 0
+
+    # Optional: Save body to file for debugging
+    # - name: Save email body to /tmp for debug
+    #   ansible.builtin.copy:
+    #     content: "{{ email_body }}"
+    #     dest: /tmp/monitoring-alert.txt
+    #   when: failed_hosts | length > 0
+
+    - name: Send email alert using msmtp (only if thresholds exceeded)
+      ansible.builtin.shell: |
+        echo "{{ email_body }}" | \
+        ctr -n k8s.io run --rm \
+          --mount type=bind,source=/tmp,target=/tmp \
+          --mount type=bind,source=/dev/null,target=/dev/null \
+          docker.io/library/awx-ee-msmtp:latest msmtp-run \
+          msmtp \
+            --host={{ smtp_host }} \
+            --port={{ smtp_port }} \
+            --auth=on \
+            --tls=on \
+            --tls-starttls=on \
+            --user={{ smtp_user }} \
+            --passwordeval="echo '{{ smtp_pass }}'" \
+            --from={{ smtp_from }} \
+            {{ recipient }}
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false  # don't fail whole playbook if email fails
+      when: failed_hosts | length > 0
 
     - name: Fail the playbook if any node exceeds thresholds
       ansible.builtin.fail:
