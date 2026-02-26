@@ -183,34 +183,43 @@
     #     content: "{{ email_body }}"
     #     dest: /tmp/monitoring-alert.txt
     #   when: failed_hosts | length > 0
+    - name: Prepare email body (only when there are issues)
+      ansible.builtin.set_fact:
+        email_body: |
+          Subject: [ALERT] Resource Thresholds Exceeded in Cluster
 
-    - name: Send email alert using msmtp (only if thresholds exceeded)
-      ansible.builtin.shell: |
-        echo "{{ email_body }}" | \
-        ctr -n k8s.io run --rm \
-          --mount type=bind,source=/tmp,target=/tmp \
-          --mount type=bind,source=/dev/null,target=/dev/null \
-          docker.io/library/awx-ee-msmtp:latest msmtp-run \
-          msmtp \
-            --host={{ smtp_host }} \
-            --port={{ smtp_port }} \
-            --auth=on \
-            --tls=on \
-            --tls-starttls=on \
-            --user={{ smtp_user }} \
-            --passwordeval="echo '{{ smtp_pass }}'" \
-            --from={{ smtp_from }} \
-            {{ recipient }}
-      args:
-        executable: /bin/bash
-      changed_when: false
-      failed_when: false  # don't fail whole playbook if email fails
-      when: failed_hosts | length > 0
+          Hello Krishna,
 
-    - name: Fail the playbook if any node exceeds thresholds
-      ansible.builtin.fail:
-        msg: |
-          🚨 Resource thresholds exceeded on the following nodes:
+          The resource monitoring playbook detected issues on one or more nodes.
 
+          Execution time: {{ lookup('pipe', 'date --iso-8601=seconds') | default('n/a') }}
+
+          ## Cluster Resource Summary
+
+          | Host                  | CPU % | Mem % | Disk % | k3s GB | Status |
+          |:----------------------|------:|------:|-------:|-------:|--------|
+          {% for host in groups['all'] | sort %}
+          | {{ host | truncate(21) }} | {{ hostvars[host].monitoring_summary.cpu | default('n/a') }} | {{ hostvars[host].monitoring_summary.memory | default('n/a') }} | {{ hostvars[host].monitoring_summary.disk | default('n/a') }} | {{ hostvars[host].monitoring_summary.k3s | default('n/a') }} | {{ 'FAIL' if hostvars[host].monitoring_summary.failed | default(false) else 'OK' }} |
+          {% endfor %}
+
+          ## Filesystem Usage per Host (warning if ≥ 80%)
+
+          {% for host in groups['all'] | sort %}
+          ### {{ host }}
+          | Mount Point              | Usage  | Status |
+          |:-------------------------|-------:|--------|
+          {% for fs in hostvars[host].filesystem_usage | default([]) %}
+          | {{ fs.mount | truncate(24) }} | {{ fs.usage }} | {{ '⚠️ WARNING' if fs.over_threshold else 'OK' }} |
+          {% else %}
+          | (no data collected)      | —      | —      |
+          {% endfor %}
+          {% endfor %}
+
+          Failed nodes:
           • {{ failed_hosts | join('\n• ') | default('none') }}
+
+          Please investigate promptly.
+
+          Regards,
+          AWX Monitoring
       when: failed_hosts | length > 0
