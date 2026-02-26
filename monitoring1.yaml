@@ -192,7 +192,7 @@
 
           The resource monitoring playbook detected issues on one or more nodes.
 
-          Execution time: {{ lookup('pipe', 'date --iso-8601=seconds') | default('n/a') }}
+          Execution time: {{ now(fmt='%Y-%m-%d %H:%M:%S %Z') }}
 
           ## Cluster Resource Summary
 
