@@ -114,32 +114,57 @@
       register: app_status
       changed_when: false
 
+    #####################
+    # START
+    #####################
     - name: Start App
       shell: /opt/IBM/JazzTeamServer/server/server.startup
       when:
         - action == "start"
         - app_status.stdout == ""
 
-    - name: Stop App
-      shell: /opt/IBM/JazzTeamServer/server/server.shutdown || true
-      when:
-        - action == "stop"
-        - app_status.stdout != ""
-
-    - name: Wait for App start (DCC/LQE)
+    - name: Wait for App start (DCC/LQE) if just started
       uri:
         url: "https://{{ inventory_hostname }}:9443/{{ item }}/"
         validate_certs: no
         follow_redirects: all
         status_code: 200
-      retries: 30
+      retries: 40
       delay: 15
       register: app_check
       until: app_check.status == 200
       loop:
         - dcc
         - lqe
-      when: action == "start"
+      when:
+        - action == "start"
+        - app_status.stdout == ""  # Only wait if we just started the JVM
+
+    - name: Validate App (DCC/LQE) if already running
+      uri:
+        url: "https://{{ inventory_hostname }}:9443/{{ item }}/"
+        validate_certs: no
+        follow_redirects: all
+        status_code: 200
+      retries: 10
+      delay: 10
+      register: app_check
+      until: app_check.status == 200
+      loop:
+        - dcc
+        - lqe
+      when:
+        - action == "start"
+        - app_status.stdout != ""  # Only validate if already running
+
+    #####################
+    # STOP
+    #####################
+    - name: Stop App
+      shell: /opt/IBM/JazzTeamServer/server/server.shutdown || true
+      when:
+        - action == "stop"
+        - app_status.stdout != ""
 
     - name: Wait for App stop (DCC/LQE)
       wait_for:
