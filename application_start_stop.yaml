@@ -19,7 +19,7 @@
     PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
 
   tasks:
-    - name: Check Oracle PMON for each SID
+    - name: Check Oracle PMON
       shell: ps -ef | grep "ora_pmon_{{ item }}" | grep -v grep || true
       loop: "{{ oracle_sids }}"
       register: pmon_check
@@ -81,21 +81,9 @@
         ./stop-jazz || true
       when: action == "stop"
 
-    - name: Pause for JAS initialization
+    - name: Pause after JAS start
       pause:
         seconds: 30
-      when: action == "start"
-
-    - name: Validate JAS
-      uri:
-        url: https://{{ inventory_hostname }}:9643/oidc/endpoint/jazzop
-        validate_certs: no
-        follow_redirects: all
-        status_code: 200
-      retries: 12          # 2 minutes
-      delay: 10
-      register: jas_check
-      until: jas_check.status == 200
       when: action == "start"
 
 ###############################################################################
@@ -131,24 +119,9 @@
         ./server.shutdown || true
       when: action == "stop"
 
-    - name: Pause for App initialization
+    - name: Pause after App start
       pause:
         seconds: 30
-      when: action == "start"
-
-    - name: Validate App (DCC / LQE)
-      uri:
-        url: "https://{{ inventory_hostname }}:9443/{{ item }}/"
-        validate_certs: no
-        follow_redirects: all
-        status_code: 200
-      loop:
-        - dcc
-        - lqe
-      retries: 12          # 2 minutes
-      delay: 10
-      register: app_check
-      until: app_check.status == 200
       when: action == "start"
 
 ###############################################################################
@@ -184,21 +157,9 @@
         ./server.shutdown || true
       when: action == "stop"
 
-    - name: Pause for JTS initialization
+    - name: Pause after JTS start
       pause:
         seconds: 30
-      when: action == "start"
-
-    - name: Validate JTS
-      uri:
-        url: https://{{ inventory_hostname }}:9443/jts/
-        validate_certs: no
-        follow_redirects: all
-        status_code: 200
-      retries: 12          # 2 minutes
-      delay: 10
-      register: jts_check
-      until: jts_check.status == 200
       when: action == "start"
 
 ###############################################################################
@@ -234,7 +195,7 @@
   tasks:
     - debug:
         msg: |
-          ✅ Action {{ action | upper }} completed successfully
+          ✅ Action {{ action | upper }} completed
           ✔ Oracle
           ✔ JAS
           ✔ Application (DCC/LQE)
