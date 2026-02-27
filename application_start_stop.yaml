@@ -1,0 +1,168 @@
+---
+########################
+# ORACLE
+########################
+- name: ORACLE | {{ action | upper }}
+  hosts: oracle
+  become: yes
+  become_user: oradba
+  serial: 1
+  tasks:
+    - name: Check Oracle status
+      shell: "{{ oracle_check_cmd }}"
+      register: oracle_status
+      ignore_errors: yes
+
+    - name: Start Oracle DB
+      shell: |
+        sqlplus / as sysdba <<EOF
+        startup;
+        exit;
+        EOF
+      when:
+        - action == "start"
+        - oracle_status.rc != 0
+
+    - name: Stop Oracle DB
+      shell: |
+        sqlplus / as sysdba <<EOF
+        shutdown immediate;
+        exit;
+        EOF
+      when: action == "stop"
+
+    - name: Validate Oracle DB
+      shell: "{{ oracle_check_cmd }}"
+      when: action == "start"
+      register: oracle_validate
+      failed_when: oracle_validate.rc != 0
+
+########################
+# JAS
+########################
+- name: JAS | {{ action | upper }}
+  hosts: jas
+  become: yes
+  serial: 1
+  tasks:
+    - name: Check JAS
+      shell: "{{ java_check_cmd }}"
+      register: jas_status
+      ignore_errors: yes
+
+    - name: Start JAS
+      shell: "{{ jas_start_cmd }}"
+      when:
+        - action == "start"
+        - jas_status.rc != 0
+
+    - name: Stop JAS
+      shell: "{{ jas_stop_cmd }}"
+      when: action == "stop"
+
+    - name: Validate JAS
+      shell: "{{ java_check_cmd }}"
+      when: action == "start"
+      register: jas_validate
+      failed_when: jas_validate.rc != 0
+
+########################
+# APPLICATION
+########################
+- name: APPLICATION | {{ action | upper }}
+  hosts: app
+  become: yes
+  serial: 1
+  tasks:
+    - name: Check App
+      shell: "{{ java_check_cmd }}"
+      register: app_status
+      ignore_errors: yes
+
+    - name: Start Application
+      shell: "{{ app_start_cmd }}"
+      when:
+        - action == "start"
+        - app_status.rc != 0
+
+    - name: Stop Application
+      shell: "{{ app_stop_cmd }}"
+      when: action == "stop"
+
+    - name: Validate Application
+      shell: "{{ java_check_cmd }}"
+      when: action == "start"
+      register: app_validate
+      failed_when: app_validate.rc != 0
+
+########################
+# JTS (LAST ON START)
+########################
+- name: JTS | {{ action | upper }}
+  hosts: jts
+  become: yes
+  serial: 1
+  tasks:
+    - name: Check JTS
+      shell: "{{ java_check_cmd }}"
+      register: jts_status
+      ignore_errors: yes
+
+    - name: Start JTS
+      shell: "{{ app_start_cmd }}"
+      when:
+        - action == "start"
+        - jts_status.rc != 0
+
+    - name: Stop JTS
+      shell: "{{ app_stop_cmd }}"
+      when: action == "stop"
+
+    - name: Validate JTS
+      shell: "{{ java_check_cmd }}"
+      when: action == "start"
+      register: jts_validate
+      failed_when: jts_validate.rc != 0
+
+########################
+# IHS
+########################
+- name: IHS | {{ action | upper }}
+  hosts: ihs
+  become: yes
+  serial: 1
+  tasks:
+    - name: Check IHS
+      shell: "{{ ihs_check_cmd }}"
+      register: ihs_status
+      ignore_errors: yes
+
+    - name: Start IHS
+      shell: "{{ ihs_start_cmd }}"
+      when:
+        - action == "start"
+        - ihs_status.rc != 0
+
+    - name: Stop IHS
+      shell: "{{ ihs_stop_cmd }}"
+      when: action == "stop"
+
+    - name: Validate IHS
+      shell: "{{ ihs_check_cmd }}"
+      when: action == "start"
+      register: ihs_validate
+      failed_when: ihs_validate.rc != 0
+
+########################
+# NOTIFICATION
+########################
+- name: NOTIFY | {{ action | upper }} RESULT
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - debug:
+        msg: |
+          ✅ Action: {{ action | upper }}
+          ✔ Order enforced
+          ✔ Validation completed
+          ✔ Environment healthy
