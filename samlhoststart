@@ -1,0 +1,15 @@
+[ihs]
+samlihs1.fyre.ibm.com
+
+[jts]
+saml-jts1.fyre.ibm.com
+
+[jas]
+saml-jas1.fyre.ibm.com
+
+[app]
+saml-lqe1.fyre.ibm.com
+saml-dcc1.fyre.ibm.com
+
+[oracle]
+saml-orc1.fyre.ibm.com
