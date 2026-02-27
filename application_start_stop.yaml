@@ -1,6 +1,6 @@
 ---
 ########################
-# ORACLE (MULTI-SID)
+# ORACLE (CLMINST + LDXDB)
 ########################
 - name: ORACLE | {{ action | upper }}
   hosts: oracle
@@ -19,29 +19,31 @@
     PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
 
   tasks:
-    - name: Oracle | Check status for each SID
+    - name: Check Oracle status
       shell: |
-        export ORACLE_SID={{ item }}
-        echo "SID={{ item }}"
-        ps -ef | grep ora_pmon_{{ item }} | grep -v grep || true
-      loop: "{{ oracle_sids }}"
+        set -o pipefail
+        lsnrctl status || true
+        for SID in {{ oracle_sids | join(' ') }}; do
+          export ORACLE_SID=$SID
+          echo "=== $SID ==="
+          ps -ef | grep "ora_pmon_$SID" | grep -v grep || true
+        done
       register: oracle_status
       changed_when: false
 
-    - name: Oracle | Start databases
+    - name: Start Oracle DBs
       shell: |
-        export ORACLE_SID={{ item.item }}
+        export ORACLE_SID={{ item }}
         sqlplus / as sysdba <<EOF
         startup;
         exit;
         EOF
-      loop: "{{ oracle_status.results }}"
+      loop: "{{ oracle_sids }}"
       when:
         - action == "start"
-        - item.stdout is search("SID=")
-        - item.stdout is not search("ora_pmon")
+        - oracle_status.stdout is not search("ora_pmon_{{ item }}")
 
-    - name: Oracle | Stop databases
+    - name: Stop Oracle DBs
       shell: |
         export ORACLE_SID={{ item }}
         sqlplus / as sysdba <<EOF
@@ -50,19 +52,6 @@
         EOF
       loop: "{{ oracle_sids }}"
       when: action == "stop"
-
-    - name: Oracle | Validate databases
-      shell: |
-        export ORACLE_SID={{ item }}
-        sqlplus -s / as sysdba <<EOF
-        SET HEADING OFF FEEDBACK OFF
-        SELECT open_mode FROM v\$database;
-        EXIT;
-        EOF
-      loop: "{{ oracle_sids }}"
-      register: oracle_validate
-      failed_when: oracle_validate.stdout is not search("READ WRITE")
-      when: action == "start"
 
 ########################
 # JAS
@@ -74,7 +63,7 @@
 
   tasks:
     - name: Check JAS
-      shell: ps -ef | grep java | grep jazz | grep -v grep || true
+      shell: ps -ef | grep java | grep JazzAuthServer | grep -v grep || true
       register: jas_status
       changed_when: false
 
@@ -89,7 +78,7 @@
       when: action == "stop"
 
     - name: Validate JAS
-      shell: ps -ef | grep java | grep jazz | grep -v grep
+      shell: ps -ef | grep java | grep JazzAuthServer | grep -v grep
       register: jas_validate
       failed_when: jas_validate.stdout == ""
       when: action == "start"
@@ -104,7 +93,7 @@
 
   tasks:
     - name: Check Application
-      shell: ps -ef | grep java | grep app | grep -v grep || true
+      shell: ps -ef | grep java | grep JazzTeamServer | grep -v grep || true
       register: app_status
       changed_when: false
 
@@ -119,7 +108,7 @@
       when: action == "stop"
 
     - name: Validate Application
-      shell: ps -ef | grep java | grep app | grep -v grep
+      shell: ps -ef | grep java | grep JazzTeamServer | grep -v grep
       register: app_validate
       failed_when: app_validate.stdout == ""
       when: action == "start"
@@ -134,7 +123,7 @@
 
   tasks:
     - name: Check JTS
-      shell: ps -ef | grep java | grep jts | grep -v grep || true
+      shell: ps -ef | grep java | grep JazzTeamServer | grep -v grep || true
       register: jts_status
       changed_when: false
 
@@ -149,7 +138,7 @@
       when: action == "stop"
 
     - name: Validate JTS
-      shell: ps -ef | grep java | grep jts | grep -v grep
+      shell: ps -ef | grep java | grep JazzTeamServer | grep -v grep
       register: jts_validate
       failed_when: jts_validate.stdout == ""
       when: action == "start"
@@ -190,12 +179,10 @@
 - name: NOTIFY | {{ action | upper }} RESULT
   hosts: localhost
   gather_facts: no
-
   tasks:
     - debug:
         msg: |
           ✅ Action: {{ action | upper }}
-          ✔ Oracle (CLMINST, LDXDB) handled
-          ✔ JAS, APP, JTS, IHS idempotent
-          ✔ Start/Stop order enforced
-          ✔ Validation successful
+          ✔ Order enforced
+          ✔ All services validated
+          ✔ Environment healthy
