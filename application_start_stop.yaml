@@ -8,9 +8,12 @@
   become_user: oradba
   serial: 1
 
+  vars:
+    oracle_sid: CLMINST
+
   environment:
     ORACLE_HOME: /home/oradba/app/oradba/product/19.0.0/dbhome_1
-    ORACLE_SID: CLMINST
+    ORACLE_SID: "{{ oracle_sid }}"
     PATH: "/home/oradba/app/oradba/product/19.0.0/dbhome_1/bin:{{ ansible_env.PATH }}"
 
   tasks:
@@ -29,7 +32,7 @@
         EOF
 
         echo "=== PMON ==="
-        ps -ef | grep "ora_pmon_{{ ORACLE_SID }}" | grep -v grep
+        ps -ef | grep "ora_pmon_{{ oracle_sid }}" | grep -v grep
       register: oracle_status
       ignore_errors: yes
 
@@ -41,7 +44,7 @@
         EOF
       when:
         - action == "start"
-        - oracle_status.stdout is not search("ora_pmon_{{ ORACLE_SID }}")
+        - oracle_status.stdout is not search("ora_pmon_{{ oracle_sid }}")
 
     - name: Stop Oracle DB
       shell: |
