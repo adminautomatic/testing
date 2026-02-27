@@ -107,7 +107,7 @@
       ignore_errors: yes
 
     - name: Start Application
-      shell: '/opt/IBM/JazzTeamServer/server/server.startup
+      shell: /opt/IBM/JazzTeamServer/server/server.startup
       when:
         - action == "start"
         - app_status.rc != 0
@@ -137,13 +137,13 @@
       ignore_errors: yes
 
     - name: Start JTS
-      shell: '/opt/IBM/JazzTeamServer/server/server.startup
+      shell: /opt/IBM/JazzTeamServer/server/server.startup
       when:
         - action == "start"
         - jts_status.rc != 0
 
     - name: Stop JTS
-      shell:/opt/IBM/JazzTeamServer/server/server.shutdown
+      shell: /opt/IBM/JazzTeamServer/server/server.shutdown
       when: action == "stop"
 
     - name: Validate JTS
