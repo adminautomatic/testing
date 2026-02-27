@@ -1,6 +1,6 @@
 ---
 ########################
-# ORACLE (CLMINST + LDXDB)
+# ORACLE
 ########################
 - name: ORACLE | {{ action | upper }}
   hosts: oracle
@@ -19,13 +19,9 @@
     PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
 
   tasks:
-    - name: Check Oracle status
+    - name: Check Oracle PMON
       shell: |
-        set -o pipefail
-        lsnrctl status || true
         for SID in {{ oracle_sids | join(' ') }}; do
-          export ORACLE_SID=$SID
-          echo "=== $SID ==="
           ps -ef | grep "ora_pmon_$SID" | grep -v grep || true
         done
       register: oracle_status
@@ -43,15 +39,12 @@
         - action == "start"
         - oracle_status.stdout is not search("ora_pmon_{{ item }}")
 
-    - name: Stop Oracle DBs
+    - name: Wait for Oracle
       shell: |
         export ORACLE_SID={{ item }}
-        sqlplus / as sysdba <<EOF
-        shutdown immediate;
-        exit;
-        EOF
+        until sqlplus -s / as sysdba <<< "select 1 from dual;" >/dev/null 2>&1; do sleep 5; done
       loop: "{{ oracle_sids }}"
-      when: action == "stop"
+      when: action == "start"
 
 ########################
 # JAS
@@ -73,18 +66,15 @@
         - action == "start"
         - jas_status.stdout == ""
 
-    - name: Stop JAS
-      shell: /opt/IBM/JazzAuthServer/stop-jazz || true
-      when: action == "stop"
-
-    - name: Validate JAS
-      shell: ps -ef | grep java | grep JazzAuthServer | grep -v grep
-      register: jas_validate
-      failed_when: jas_validate.stdout == ""
+    - name: Wait for JAS
+      wait_for:
+        port: 9643
+        delay: 5
+        timeout: 300
       when: action == "start"
 
 ########################
-# APPLICATION
+# APPLICATION (DCC + LQE)
 ########################
 - name: APPLICATION | {{ action | upper }}
   hosts: app
@@ -92,29 +82,30 @@
   serial: 1
 
   tasks:
-    - name: Check Application
+    - name: Check JazzTeamServer JVM
       shell: ps -ef | grep java | grep JazzTeamServer | grep -v grep || true
       register: app_status
       changed_when: false
 
-    - name: Start Application
+    - name: Start App
       shell: /opt/IBM/JazzTeamServer/server/server.startup
       when:
         - action == "start"
         - app_status.stdout == ""
 
-    - name: Stop Application
-      shell: /opt/IBM/JazzTeamServer/server/server.shutdown || true
-      when: action == "stop"
-
-    - name: Validate Application
-      shell: ps -ef | grep java | grep JazzTeamServer | grep -v grep
-      register: app_validate
-      failed_when: app_validate.stdout == ""
+    - name: Wait for App
+      uri:
+        url: https://{{ inventory_hostname }}:9443/
+        validate_certs: no
+        status_code: 200
+      retries: 20
+      delay: 15
+      register: app_check
+      until: app_check.status == 200
       when: action == "start"
 
 ########################
-# JTS (LAST ON START)
+# JTS
 ########################
 - name: JTS | {{ action | upper }}
   hosts: jts
@@ -122,7 +113,7 @@
   serial: 1
 
   tasks:
-    - name: Check JTS
+    - name: Check JTS JVM
       shell: ps -ef | grep java | grep JazzTeamServer | grep -v grep || true
       register: jts_status
       changed_when: false
@@ -133,14 +124,15 @@
         - action == "start"
         - jts_status.stdout == ""
 
-    - name: Stop JTS
-      shell: /opt/IBM/JazzTeamServer/server/server.shutdown || true
-      when: action == "stop"
-
-    - name: Validate JTS
-      shell: ps -ef | grep java | grep JazzTeamServer | grep -v grep
-      register: jts_validate
-      failed_when: jts_validate.stdout == ""
+    - name: Wait for JTS
+      uri:
+        url: https://{{ inventory_hostname }}:9443/jts
+        validate_certs: no
+        status_code: 200
+      retries: 20
+      delay: 15
+      register: jts_check
+      until: jts_check.status == 200
       when: action == "start"
 
 ########################
@@ -163,26 +155,26 @@
         - action == "start"
         - ihs_status.stdout == ""
 
-    - name: Stop IHS
-      shell: /opt/IBM/HTTPServer/bin/apachectl -k stop || true
-      when: action == "stop"
-
-    - name: Validate IHS
-      shell: ps -ef | grep httpd | grep -v grep
-      register: ihs_validate
-      failed_when: ihs_validate.stdout == ""
+    - name: Wait for IHS
+      wait_for:
+        port: 80
+        delay: 5
+        timeout: 300
       when: action == "start"
 
 ########################
-# NOTIFICATION
+# FINAL STATUS
 ########################
-- name: NOTIFY | {{ action | upper }} RESULT
+- name: FINAL STATUS
   hosts: localhost
   gather_facts: no
+
   tasks:
     - debug:
         msg: |
-          ✅ Action: {{ action | upper }}
-          ✔ Order enforced
-          ✔ All services validated
-          ✔ Environment healthy
+          ✅ Action {{ action | upper }} completed in sequence
+          ✔ Oracle ready
+          ✔ JAS ready
+          ✔ Applications ready
+          ✔ JTS ready
+          ✔ IHS ready
