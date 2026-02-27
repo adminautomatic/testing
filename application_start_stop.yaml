@@ -7,9 +7,29 @@
   become: yes
   become_user: oradba
   serial: 1
+
+  environment:
+    ORACLE_HOME: /home/oradba/app/oradba/product/19.0.0/dbhome_1
+    ORACLE_SID: CLMINST
+    PATH: "/home/oradba/app/oradba/product/19.0.0/dbhome_1/bin:{{ ansible_env.PATH }}"
+
   tasks:
     - name: Check Oracle status
-      shell: "{{ oracle_check_cmd }}"
+      shell: |
+        set -o pipefail
+
+        echo "=== Listener ==="
+        lsnrctl status
+
+        echo "=== DB open mode ==="
+        sqlplus -s / as sysdba <<EOF
+        SET HEADING OFF FEEDBACK OFF
+        SELECT open_mode FROM v\$database;
+        EXIT;
+        EOF
+
+        echo "=== PMON ==="
+        ps -ef | grep "ora_pmon_{{ ORACLE_SID }}" | grep -v grep
       register: oracle_status
       ignore_errors: yes
 
@@ -21,7 +41,7 @@
         EOF
       when:
         - action == "start"
-        - oracle_status.rc != 0
+        - oracle_status.stdout is not search("ora_pmon_{{ ORACLE_SID }}")
 
     - name: Stop Oracle DB
       shell: |
@@ -32,10 +52,15 @@
       when: action == "stop"
 
     - name: Validate Oracle DB
-      shell: "{{ oracle_check_cmd }}"
-      when: action == "start"
+      shell: |
+        sqlplus -s / as sysdba <<EOF
+        SET HEADING OFF FEEDBACK OFF
+        SELECT open_mode FROM v\$database;
+        EXIT;
+        EOF
       register: oracle_validate
-      failed_when: oracle_validate.rc != 0
+      failed_when: oracle_validate.stdout is not search("READ WRITE")
+      when: action == "start"
 
 ########################
 # JAS
@@ -44,27 +69,28 @@
   hosts: jas
   become: yes
   serial: 1
+
   tasks:
     - name: Check JAS
-      shell: "{{ java_check_cmd }}"
+      shell: ps -ef | grep java | grep jas | grep -v grep
       register: jas_status
       ignore_errors: yes
 
     - name: Start JAS
-      shell: "{{ jas_start_cmd }}"
+      shell: /opt/IBM/JazzAuthServer/start-jazz
       when:
         - action == "start"
         - jas_status.rc != 0
 
     - name: Stop JAS
-      shell: "{{ jas_stop_cmd }}"
+      shell: /opt/IBM/JazzAuthServer/stop-jazz
       when: action == "stop"
 
     - name: Validate JAS
-      shell: "{{ java_check_cmd }}"
-      when: action == "start"
+      shell: ps -ef | grep java | grep jas | grep -v grep
       register: jas_validate
       failed_when: jas_validate.rc != 0
+      when: action == "start"
 
 ########################
 # APPLICATION
@@ -73,27 +99,28 @@
   hosts: app
   become: yes
   serial: 1
+
   tasks:
-    - name: Check App
-      shell: "{{ java_check_cmd }}"
+    - name: Check Application
+      shell: ps -ef | grep java | grep app | grep -v grep
       register: app_status
       ignore_errors: yes
 
     - name: Start Application
-      shell: "{{ app_start_cmd }}"
+      shell: '/opt/IBM/JazzTeamServer/server/server.startup
       when:
         - action == "start"
         - app_status.rc != 0
 
     - name: Stop Application
-      shell: "{{ app_stop_cmd }}"
+      shell: /opt/IBM/JazzTeamServer/server/server.shutdown
       when: action == "stop"
 
     - name: Validate Application
-      shell: "{{ java_check_cmd }}"
-      when: action == "start"
+      shell: ps -ef | grep java | grep app | grep -v grep
       register: app_validate
       failed_when: app_validate.rc != 0
+      when: action == "start"
 
 ########################
 # JTS (LAST ON START)
@@ -102,27 +129,28 @@
   hosts: jts
   become: yes
   serial: 1
+
   tasks:
     - name: Check JTS
-      shell: "{{ java_check_cmd }}"
+      shell: ps -ef | grep java | grep jts | grep -v grep
       register: jts_status
       ignore_errors: yes
 
     - name: Start JTS
-      shell: "{{ app_start_cmd }}"
+      shell: '/opt/IBM/JazzTeamServer/server/server.startup
       when:
         - action == "start"
         - jts_status.rc != 0
 
     - name: Stop JTS
-      shell: "{{ app_stop_cmd }}"
+      shell:/opt/IBM/JazzTeamServer/server/server.shutdown
       when: action == "stop"
 
     - name: Validate JTS
-      shell: "{{ java_check_cmd }}"
-      when: action == "start"
+      shell: ps -ef | grep java | grep jts | grep -v grep
       register: jts_validate
       failed_when: jts_validate.rc != 0
+      when: action == "start"
 
 ########################
 # IHS
@@ -131,27 +159,28 @@
   hosts: ihs
   become: yes
   serial: 1
+
   tasks:
     - name: Check IHS
-      shell: "{{ ihs_check_cmd }}"
+      shell: ps -ef | grep httpd | grep -v grep
       register: ihs_status
       ignore_errors: yes
 
     - name: Start IHS
-      shell: "{{ ihs_start_cmd }}"
+      shell: /opt/IBM/HTTPServer/bin/apachectl -k start
       when:
         - action == "start"
         - ihs_status.rc != 0
 
     - name: Stop IHS
-      shell: "{{ ihs_stop_cmd }}"
+      shell: /opt/IBM/HTTPServer/bin/apachectl -k stop
       when: action == "stop"
 
     - name: Validate IHS
-      shell: "{{ ihs_check_cmd }}"
-      when: action == "start"
+      shell: ps -ef | grep httpd | grep -v grep
       register: ihs_validate
       failed_when: ihs_validate.rc != 0
+      when: action == "start"
 
 ########################
 # NOTIFICATION
@@ -163,6 +192,6 @@
     - debug:
         msg: |
           ✅ Action: {{ action | upper }}
-          ✔ Order enforced
-          ✔ Validation completed
+          ✔ Start/stop order enforced
+          ✔ All validations passed
           ✔ Environment healthy
