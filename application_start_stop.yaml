@@ -1,6 +1,6 @@
 ---
 ########################
-# ORACLE
+# ORACLE (MULTI DB)
 ########################
 - name: ORACLE | {{ action | upper }}
   hosts: oracle
@@ -9,58 +9,72 @@
   serial: 1
 
   vars:
-    oracle_sid: CLMINST
+    oracle_home: /home/oradba/app/oradba/product/19.0.0/dbhome_1
+    oracle_sids:
+      - CLMINST
+      - LDXDB
 
   environment:
-    ORACLE_HOME: /home/oradba/app/oradba/product/19.0.0/dbhome_1
-    ORACLE_SID: "{{ oracle_sid }}"
-    PATH: "/home/oradba/app/oradba/product/19.0.0/dbhome_1/bin:{{ ansible_env.PATH }}"
+    ORACLE_HOME: "{{ oracle_home }}"
+    PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
 
   tasks:
-    - name: Check Oracle status
+    - name: Check Oracle Listener
+      shell: lsnrctl status || true
+      register: listener_status
+      changed_when: false
+
+    - name: Check Oracle DB status
       shell: |
-        set -o pipefail
+        export ORACLE_SID={{ item }}
 
-        echo "=== Listener ==="
-        lsnrctl status
+        echo "=== SID {{ item }} ==="
 
-        echo "=== DB open mode ==="
-        sqlplus -s / as sysdba <<EOF
+        sqlplus -s / as sysdba <<EOF || true
         SET HEADING OFF FEEDBACK OFF
         SELECT open_mode FROM v\$database;
         EXIT;
         EOF
 
-        echo "=== PMON ==="
-        ps -ef | grep "ora_pmon_{{ oracle_sid }}" | grep -v grep
+        ps -ef | grep "ora_pmon_{{ item }}" | grep -v grep || true
+      loop: "{{ oracle_sids }}"
       register: oracle_status
-      ignore_errors: yes
+      changed_when: false
 
-    - name: Start Oracle DB
+    - name: Start Oracle DB if down
       shell: |
+        export ORACLE_SID={{ item.item }}
+
         sqlplus / as sysdba <<EOF
         startup;
         exit;
         EOF
+      loop: "{{ oracle_status.results }}"
       when:
         - action == "start"
-        - oracle_status.stdout is not search("ora_pmon_{{ oracle_sid }}")
+        - item.stdout is not search("ora_pmon_{{ item.item }}")
 
     - name: Stop Oracle DB
       shell: |
+        export ORACLE_SID={{ item }}
+
         sqlplus / as sysdba <<EOF
         shutdown immediate;
         exit;
         EOF
+      loop: "{{ oracle_sids }}"
       when: action == "stop"
 
     - name: Validate Oracle DB
       shell: |
+        export ORACLE_SID={{ item }}
+
         sqlplus -s / as sysdba <<EOF
         SET HEADING OFF FEEDBACK OFF
         SELECT open_mode FROM v\$database;
         EXIT;
         EOF
+      loop: "{{ oracle_sids }}"
       register: oracle_validate
       failed_when: oracle_validate.stdout is not search("READ WRITE")
       when: action == "start"
@@ -75,7 +89,7 @@
 
   tasks:
     - name: Check JAS
-      shell: ps -ef | grep java | grep jas | grep -v grep
+      shell: ps -ef | grep java | grep jazz | grep -v grep
       register: jas_status
       ignore_errors: yes
 
@@ -90,7 +104,7 @@
       when: action == "stop"
 
     - name: Validate JAS
-      shell: ps -ef | grep java | grep jas | grep -v grep
+      shell: ps -ef | grep java | grep jazz | grep -v grep
       register: jas_validate
       failed_when: jas_validate.rc != 0
       when: action == "start"
@@ -195,6 +209,7 @@
     - debug:
         msg: |
           ✅ Action: {{ action | upper }}
+          ✔ Oracle (CLMINST, LDXDB) processed correctly
           ✔ Start/stop order enforced
           ✔ All validations passed
           ✔ Environment healthy
