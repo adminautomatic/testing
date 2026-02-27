@@ -1,6 +1,5 @@
----
 ########################
-# ORACLE
+# ORACLE (CLMINST + LDXDB)
 ########################
 - name: ORACLE | {{ action | upper }}
   hosts: oracle
@@ -39,12 +38,24 @@
         - action == "start"
         - oracle_status.stdout is not search("ora_pmon_{{ item }}")
 
-    - name: Wait for Oracle
+    - name: Stop Oracle DBs
       shell: |
         export ORACLE_SID={{ item }}
-        until sqlplus -s / as sysdba <<< "select 1 from dual;" >/dev/null 2>&1; do sleep 5; done
+        sqlplus / as sysdba <<EOF
+        shutdown immediate;
+        exit;
+        EOF
       loop: "{{ oracle_sids }}"
-      when: action == "start"
+      when:
+        - action == "stop"
+        - oracle_status.stdout is search("ora_pmon_{{ item }}")
+
+    - name: Wait for Oracle stop
+      shell: |
+        for SID in {{ oracle_sids | join(' ') }}; do
+          while ps -ef | grep "ora_pmon_$SID" | grep -v grep; do sleep 5; done
+        done
+      when: action == "stop"
 
 ########################
 # JAS
@@ -66,12 +77,28 @@
         - action == "start"
         - jas_status.stdout == ""
 
-    - name: Wait for JAS
+    - name: Stop JAS
+      shell: /opt/IBM/JazzAuthServer/stop-jazz || true
+      when:
+        - action == "stop"
+        - jas_status.stdout != ""
+
+    - name: Wait for JAS start
       wait_for:
+        host: "{{ inventory_hostname }}"
         port: 9643
+        state: started
         delay: 5
         timeout: 300
       when: action == "start"
+
+    - name: Wait for JAS stop
+      wait_for:
+        port: 9643
+        state: stopped
+        delay: 5
+        timeout: 300
+      when: action == "stop"
 
 ########################
 # APPLICATION (DCC + LQE)
@@ -82,7 +109,7 @@
   serial: 1
 
   tasks:
-    - name: Check JazzTeamServer JVM
+    - name: Check App JVM
       shell: ps -ef | grep java | grep JazzTeamServer | grep -v grep || true
       register: app_status
       changed_when: false
@@ -93,16 +120,34 @@
         - action == "start"
         - app_status.stdout == ""
 
-    - name: Wait for App
+    - name: Stop App
+      shell: /opt/IBM/JazzTeamServer/server/server.shutdown || true
+      when:
+        - action == "stop"
+        - app_status.stdout != ""
+
+    - name: Wait for App start (DCC/LQE)
       uri:
-        url: https://{{ inventory_hostname }}:9443/
+        url: "https://{{ inventory_hostname }}:9443/{{ item }}/"
         validate_certs: no
+        follow_redirects: all
         status_code: 200
-      retries: 20
+      retries: 30
       delay: 15
       register: app_check
       until: app_check.status == 200
+      loop:
+        - dcc
+        - lqe
       when: action == "start"
+
+    - name: Wait for App stop (DCC/LQE)
+      wait_for:
+        port: 9443
+        state: stopped
+        delay: 10
+        timeout: 600
+      when: action == "stop"
 
 ########################
 # JTS
@@ -124,16 +169,31 @@
         - action == "start"
         - jts_status.stdout == ""
 
-    - name: Wait for JTS
+    - name: Stop JTS
+      shell: /opt/IBM/JazzTeamServer/server/server.shutdown || true
+      when:
+        - action == "stop"
+        - jts_status.stdout != ""
+
+    - name: Wait for JTS start
       uri:
-        url: https://{{ inventory_hostname }}:9443/jts
+        url: "https://{{ inventory_hostname }}:9443/jts/"
         validate_certs: no
+        follow_redirects: all
         status_code: 200
-      retries: 20
+      retries: 30
       delay: 15
       register: jts_check
       until: jts_check.status == 200
       when: action == "start"
+
+    - name: Wait for JTS stop
+      wait_for:
+        port: 9443
+        state: stopped
+        delay: 10
+        timeout: 600
+      when: action == "stop"
 
 ########################
 # IHS
@@ -155,26 +215,51 @@
         - action == "start"
         - ihs_status.stdout == ""
 
-    - name: Wait for IHS
+    - name: Stop IHS
+      shell: /opt/IBM/HTTPServer/bin/apachectl -k stop || true
+      when:
+        - action == "stop"
+        - ihs_status.stdout != ""
+
+    - name: Wait for IHS start
       wait_for:
         port: 80
+        state: started
         delay: 5
         timeout: 300
       when: action == "start"
 
+    - name: Wait for IHS stop
+      wait_for:
+        port: 80
+        state: stopped
+        delay: 5
+        timeout: 300
+      when: action == "stop"
+
 ########################
-# FINAL STATUS
+# FINAL NOTIFICATION
 ########################
-- name: FINAL STATUS
+- name: NOTIFY | {{ action | upper }} RESULT
   hosts: localhost
   gather_facts: no
 
   tasks:
     - debug:
         msg: |
-          ✅ Action {{ action | upper }} completed in sequence
-          ✔ Oracle ready
-          ✔ JAS ready
-          ✔ Applications ready
-          ✔ JTS ready
+          ✅ Action: {{ action | upper }}
+          {% if action == "start" %}
+          ✔ Oracle healthy
+          ✔ JAS healthy
+          ✔ DCC/LQE running
+          ✔ JTS running
           ✔ IHS ready
+          🎉 Environment is UP
+          {% else %}
+          ✔ Oracle stopped
+          ✔ JAS stopped
+          ✔ DCC/LQE stopped
+          ✔ JTS stopped
+          ✔ IHS stopped
+          🎉 Environment is DOWN
+          {% endif %}
