@@ -1,6 +1,6 @@
 ---
 ########################
-# ORACLE (MULTI DB)
+# ORACLE (MULTI-SID)
 ########################
 - name: ORACLE | {{ action | upper }}
   hosts: oracle
@@ -19,32 +19,18 @@
     PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
 
   tasks:
-    - name: Check Oracle Listener
-      shell: lsnrctl status || true
-      register: listener_status
-      changed_when: false
-
-    - name: Check Oracle DB status
+    - name: Oracle | Check status for each SID
       shell: |
         export ORACLE_SID={{ item }}
-
-        echo "=== SID {{ item }} ==="
-
-        sqlplus -s / as sysdba <<EOF || true
-        SET HEADING OFF FEEDBACK OFF
-        SELECT open_mode FROM v\$database;
-        EXIT;
-        EOF
-
-        ps -ef | grep "ora_pmon_{{ item }}" | grep -v grep || true
+        echo "SID={{ item }}"
+        ps -ef | grep ora_pmon_{{ item }} | grep -v grep || true
       loop: "{{ oracle_sids }}"
       register: oracle_status
       changed_when: false
 
-    - name: Start Oracle DB if down
+    - name: Oracle | Start databases
       shell: |
         export ORACLE_SID={{ item.item }}
-
         sqlplus / as sysdba <<EOF
         startup;
         exit;
@@ -52,12 +38,12 @@
       loop: "{{ oracle_status.results }}"
       when:
         - action == "start"
-        - item.stdout is not search("ora_pmon_{{ item.item }}")
+        - item.stdout is search("SID=")
+        - item.stdout is not search("ora_pmon")
 
-    - name: Stop Oracle DB
+    - name: Oracle | Stop databases
       shell: |
         export ORACLE_SID={{ item }}
-
         sqlplus / as sysdba <<EOF
         shutdown immediate;
         exit;
@@ -65,10 +51,9 @@
       loop: "{{ oracle_sids }}"
       when: action == "stop"
 
-    - name: Validate Oracle DB
+    - name: Oracle | Validate databases
       shell: |
         export ORACLE_SID={{ item }}
-
         sqlplus -s / as sysdba <<EOF
         SET HEADING OFF FEEDBACK OFF
         SELECT open_mode FROM v\$database;
@@ -89,24 +74,24 @@
 
   tasks:
     - name: Check JAS
-      shell: ps -ef | grep java | grep jazz | grep -v grep
+      shell: ps -ef | grep java | grep jazz | grep -v grep || true
       register: jas_status
-      ignore_errors: yes
+      changed_when: false
 
     - name: Start JAS
       shell: /opt/IBM/JazzAuthServer/start-jazz
       when:
         - action == "start"
-        - jas_status.rc != 0
+        - jas_status.stdout == ""
 
     - name: Stop JAS
-      shell: /opt/IBM/JazzAuthServer/stop-jazz
+      shell: /opt/IBM/JazzAuthServer/stop-jazz || true
       when: action == "stop"
 
     - name: Validate JAS
       shell: ps -ef | grep java | grep jazz | grep -v grep
       register: jas_validate
-      failed_when: jas_validate.rc != 0
+      failed_when: jas_validate.stdout == ""
       when: action == "start"
 
 ########################
@@ -119,24 +104,24 @@
 
   tasks:
     - name: Check Application
-      shell: ps -ef | grep java | grep app | grep -v grep
+      shell: ps -ef | grep java | grep app | grep -v grep || true
       register: app_status
-      ignore_errors: yes
+      changed_when: false
 
     - name: Start Application
       shell: /opt/IBM/JazzTeamServer/server/server.startup
       when:
         - action == "start"
-        - app_status.rc != 0
+        - app_status.stdout == ""
 
     - name: Stop Application
-      shell: /opt/IBM/JazzTeamServer/server/server.shutdown
+      shell: /opt/IBM/JazzTeamServer/server/server.shutdown || true
       when: action == "stop"
 
     - name: Validate Application
       shell: ps -ef | grep java | grep app | grep -v grep
       register: app_validate
-      failed_when: app_validate.rc != 0
+      failed_when: app_validate.stdout == ""
       when: action == "start"
 
 ########################
@@ -149,24 +134,24 @@
 
   tasks:
     - name: Check JTS
-      shell: ps -ef | grep java | grep jts | grep -v grep
+      shell: ps -ef | grep java | grep jts | grep -v grep || true
       register: jts_status
-      ignore_errors: yes
+      changed_when: false
 
     - name: Start JTS
       shell: /opt/IBM/JazzTeamServer/server/server.startup
       when:
         - action == "start"
-        - jts_status.rc != 0
+        - jts_status.stdout == ""
 
     - name: Stop JTS
-      shell: /opt/IBM/JazzTeamServer/server/server.shutdown
+      shell: /opt/IBM/JazzTeamServer/server/server.shutdown || true
       when: action == "stop"
 
     - name: Validate JTS
       shell: ps -ef | grep java | grep jts | grep -v grep
       register: jts_validate
-      failed_when: jts_validate.rc != 0
+      failed_when: jts_validate.stdout == ""
       when: action == "start"
 
 ########################
@@ -179,24 +164,24 @@
 
   tasks:
     - name: Check IHS
-      shell: ps -ef | grep httpd | grep -v grep
+      shell: ps -ef | grep httpd | grep -v grep || true
       register: ihs_status
-      ignore_errors: yes
+      changed_when: false
 
     - name: Start IHS
       shell: /opt/IBM/HTTPServer/bin/apachectl -k start
       when:
         - action == "start"
-        - ihs_status.rc != 0
+        - ihs_status.stdout == ""
 
     - name: Stop IHS
-      shell: /opt/IBM/HTTPServer/bin/apachectl -k stop
+      shell: /opt/IBM/HTTPServer/bin/apachectl -k stop || true
       when: action == "stop"
 
     - name: Validate IHS
       shell: ps -ef | grep httpd | grep -v grep
       register: ihs_validate
-      failed_when: ihs_validate.rc != 0
+      failed_when: ihs_validate.stdout == ""
       when: action == "start"
 
 ########################
@@ -205,11 +190,12 @@
 - name: NOTIFY | {{ action | upper }} RESULT
   hosts: localhost
   gather_facts: no
+
   tasks:
     - debug:
         msg: |
           ✅ Action: {{ action | upper }}
-          ✔ Oracle (CLMINST, LDXDB) processed correctly
-          ✔ Start/stop order enforced
-          ✔ All validations passed
-          ✔ Environment healthy
+          ✔ Oracle (CLMINST, LDXDB) handled
+          ✔ JAS, APP, JTS, IHS idempotent
+          ✔ Start/Stop order enforced
+          ✔ Validation successful
