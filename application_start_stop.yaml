@@ -1,6 +1,6 @@
 ---
 ###############################################################################
-# ORACLE
+# ORACLE (CLMINST, LDXDB)
 ###############################################################################
 - name: ORACLE | {{ action | upper }}
   hosts: oracle
@@ -19,23 +19,23 @@
     PATH: "{{ oracle_home }}/bin:{{ ansible_env.PATH }}"
 
   tasks:
-    - name: Check Oracle PMON
+    - name: Check Oracle PMON for each SID
       shell: ps -ef | grep "ora_pmon_{{ item }}" | grep -v grep || true
       loop: "{{ oracle_sids }}"
-      register: oracle_status
+      register: pmon_check
       changed_when: false
 
     - name: Start Oracle DBs
       shell: |
-        export ORACLE_SID={{ item }}
+        export ORACLE_SID={{ item.item }}
         sqlplus / as sysdba <<EOF
         startup;
         exit;
         EOF
-      loop: "{{ oracle_sids }}"
+      loop: "{{ pmon_check.results }}"
       when:
         - action == "start"
-        - oracle_status.results[loop.index0].stdout == ""
+        - item.stdout == ""
 
     - name: Stop Oracle DBs
       shell: |
@@ -92,7 +92,7 @@
         validate_certs: no
         follow_redirects: all
         status_code: 200
-      retries: 12        # 2 minutes
+      retries: 12          # 2 minutes
       delay: 10
       register: jas_check
       until: jas_check.status == 200
@@ -136,7 +136,7 @@
         seconds: 30
       when: action == "start"
 
-    - name: Validate App (safe)
+    - name: Validate App (DCC / LQE)
       uri:
         url: "https://{{ inventory_hostname }}:9443/{{ item }}/"
         validate_certs: no
@@ -145,7 +145,7 @@
       loop:
         - dcc
         - lqe
-      retries: 12
+      retries: 12          # 2 minutes
       delay: 10
       register: app_check
       until: app_check.status == 200
@@ -195,7 +195,7 @@
         validate_certs: no
         follow_redirects: all
         status_code: 200
-      retries: 12
+      retries: 12          # 2 minutes
       delay: 10
       register: jts_check
       until: jts_check.status == 200
@@ -234,7 +234,7 @@
   tasks:
     - debug:
         msg: |
-          ✅ Action {{ action | upper }} completed
+          ✅ Action {{ action | upper }} completed successfully
           ✔ Oracle
           ✔ JAS
           ✔ Application (DCC/LQE)
