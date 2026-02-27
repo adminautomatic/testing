@@ -63,6 +63,7 @@
 - name: JAS | {{ action | upper }}
   hosts: jas
   become: yes
+  become_user: root       # change if JAS requires a specific user
   serial: 1
 
   tasks:
@@ -73,6 +74,19 @@
 
     - name: Start JAS
       shell: /opt/IBM/JazzAuthServer/start-jazz
+      register: jas_start
+      failed_when: jas_start.rc != 0
+      when:
+        - action == "start"
+        - jas_status.stdout == ""
+
+    - name: Wait for JAS to bind port 9643
+      wait_for:
+        host: "{{ inventory_hostname }}"
+        port: 9643
+        state: started
+        delay: 10
+        timeout: 120   # 2 minutes
       when:
         - action == "start"
         - jas_status.stdout == ""
@@ -83,21 +97,12 @@
         - action == "stop"
         - jas_status.stdout != ""
 
-    - name: Wait for JAS start
-      wait_for:
-        host: "{{ inventory_hostname }}"
-        port: 9643
-        state: started
-        delay: 5
-        timeout: 300
-      when: action == "start"
-
     - name: Wait for JAS stop
       wait_for:
         port: 9643
         state: stopped
         delay: 5
-        timeout: 300
+        timeout: 120   # 2 minutes
       when: action == "stop"
 
 ########################
@@ -138,7 +143,7 @@
         - lqe
       when:
         - action == "start"
-        - app_status.stdout == ""  # Only wait if we just started the JVM
+        - app_status.stdout == ""
 
     - name: Validate App (DCC/LQE) if already running
       uri:
@@ -155,7 +160,7 @@
         - lqe
       when:
         - action == "start"
-        - app_status.stdout != ""  # Only validate if already running
+        - app_status.stdout != ""
 
     #####################
     # STOP
@@ -171,7 +176,7 @@
         port: 9443
         state: stopped
         delay: 10
-        timeout: 600
+        timeout: 120   # 2 minutes
       when: action == "stop"
 
 ########################
@@ -217,7 +222,7 @@
         port: 9443
         state: stopped
         delay: 10
-        timeout: 600
+        timeout: 120   # 2 minutes
       when: action == "stop"
 
 ########################
@@ -251,7 +256,7 @@
         port: 80
         state: started
         delay: 5
-        timeout: 300
+        timeout: 120   # 2 minutes
       when: action == "start"
 
     - name: Wait for IHS stop
@@ -259,7 +264,7 @@
         port: 80
         state: stopped
         delay: 5
-        timeout: 300
+        timeout: 120   # 2 minutes
       when: action == "stop"
 
 ########################
